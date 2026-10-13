@@ -1,0 +1,2011 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Hard block on network access, and only the one script in this page may run (pinned by hash).
+     Any edit to the script body changes its hash and the browser will refuse to run it until the hash is updated.
+     Recompute (run in the folder holding this file):
+     python3 -c "import hashlib,base64;s=open('fortigate-log-triage.html',encoding='utf-8').read();b=s.split('<scr'+'ipt>')[-1].split('</scr'+'ipt>')[0];print('sha256-'+base64.b64encode(hashlib.sha256(b.encode()).digest()).decode())"
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-0uob/JDcPmCZT4s10MvGcs//4hrp2WdvbMDNLtXTmbU='; style-src 'unsafe-inline'; object-src 'none'; worker-src 'none'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>FortiGate log triage</title>
+<style>
+:root{
+  --bg:#EEF1F4; --panel:#FFFFFF; --soft:#F4F6F8; --ink:#1C2733; --muted:#5B6B7A; --rule:#D5DCE3;
+  --allow:#2F7D6D; --block:#B23A2E; --other:#8C96A3; --focus:#2457A6; --on-focus:#FFFFFF;
+  --bar:rgba(36,87,166,.13); --shade:rgba(238,241,244,.62);
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Liberation Mono",monospace;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#12171D; --panel:#1A2129; --soft:#151B22; --ink:#DDE4EA; --muted:#8E9BA8; --rule:#2C3641;
+    --allow:#4FA894; --block:#E06A5B; --other:#6F7B88; --focus:#7FA6E8; --on-focus:#0E1621;
+    --bar:rgba(127,166,232,.16); --shade:rgba(18,23,29,.62);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);font-variant-numeric:tabular-nums}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+h2{font-size:15px;margin:0;font-weight:620}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12.5px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+[hidden]{display:none!important}
+
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:5}
+.sub{margin-top:2px;color:var(--muted);font-size:13px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:6px 12px;cursor:pointer;line-height:1.3;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--focus);border-color:var(--focus);color:var(--on-focus);font-weight:600}
+.btn.small{padding:4px 10px;font-size:13px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:0;background:var(--panel);color:var(--muted);padding:6px 11px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--focus);background:var(--soft)}
+
+.empty{max-width:680px;margin:56px auto;padding:32px 36px;border:2px dashed var(--rule);border-radius:10px;background:var(--panel)}
+.empty h2{font-size:22px;font-weight:650;letter-spacing:-.01em;margin-bottom:10px}
+.empty p{margin-bottom:14px;color:var(--muted);max-width:62ch}
+.empty dl{margin:18px 0 0;display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
+.empty dt{font-weight:600}
+.empty dd{margin:0;color:var(--muted)}
+
+main{padding:16px 24px 56px;display:flex;flex-direction:column;gap:14px;max-width:1680px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.status{display:flex;flex-direction:column;gap:4px}
+.st-count{font-size:20px;font-weight:650;letter-spacing:-.01em;line-height:1.25}
+.st-range{font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+.st-label{font-weight:600}
+.ingested{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
+.ingested h3{font-size:13px;font-weight:620;margin:0 0 4px}
+.if-grid{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,max-content) max-content minmax(0,1fr);gap:2px 22px;font-size:13px;align-items:baseline}
+.if-h{font-size:12px;color:var(--muted);font-weight:600}
+.if-hash{font:11.5px var(--mono);color:var(--muted);word-break:break-all;user-select:all}
+.if-name{font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.if-fmt{color:var(--muted)}
+.if-n{text-align:right;color:var(--muted)}
+@media (max-width:640px){.if-grid{grid-template-columns:1fr}.if-n{text-align:left}}
+.status .warn{color:var(--block);font-size:13px}
+
+.filter{display:flex;gap:8px}
+.filter input{flex:1;min-width:0;font:14px var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:9px 12px}
+.filter input:focus{border-color:var(--focus);outline:none;box-shadow:0 0 0 3px var(--bar)}
+.help{font-size:13px}
+.help table{border-collapse:collapse}
+.help td{padding:3px 18px 3px 0;vertical-align:top}
+.help td:first-child{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;min-height:0}
+.chip{display:inline-flex;align-items:center;gap:4px;font:12.5px var(--mono);background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--focus);border-radius:3px;padding:2px 2px 2px 8px}
+.chip.neg{border-left-color:var(--block)}
+.chip.time{border-left-color:var(--muted)}
+.chip button{font:inherit;border:0;background:none;color:var(--muted);cursor:pointer;padding:0 6px;font-size:15px;line-height:1}
+.chip button:hover{color:var(--ink)}
+.ferr{color:var(--block);font-size:13px}
+
+.tl-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.tl-wrap{position:relative}
+#tl{display:block;width:100%;height:160px;cursor:crosshair;touch-action:none}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:6px 9px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.14);white-space:nowrap;z-index:2}
+.hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+.grid2{display:grid;grid-template-columns:minmax(320px,5fr) 8fr;gap:14px;align-items:start}
+@media (max-width:1100px){.grid2{grid-template-columns:1fr}}
+.sec-head{margin-bottom:10px}
+
+.finding{border-left:3px solid var(--other);padding:2px 0 2px 12px;margin-top:16px}
+.finding:first-child{margin-top:4px}
+.finding.first{border-left-color:var(--block)}
+.finding header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.finding h3{font-size:14px;margin:0;font-weight:620}
+.lvl{font-size:12px;color:var(--muted)}
+.finding.first .lvl{color:var(--block);font-weight:600}
+.finding .why{font-size:12.5px;color:var(--muted);margin:2px 0 6px;max-width:70ch}
+.frow{display:flex;flex-wrap:wrap;column-gap:10px;row-gap:0;align-items:baseline;width:100%;text-align:left;font:inherit;color:inherit;background:none;border:0;border-radius:4px;padding:3px 6px;margin-left:-6px;cursor:pointer}
+.frow:hover{background:var(--soft)}
+.frow .k{font:12.5px var(--mono);flex:0 0 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .d{font-size:12.5px;color:var(--muted);flex:1 1 220px;min-width:0}
+.none{font-size:13px;color:var(--muted)}
+
+.topgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px 22px}
+.tcard header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--rule);padding-bottom:4px;margin-bottom:4px}
+.tcard h3{font-size:13px;margin:0;font-weight:620}
+.tcard header span{font-size:12px;color:var(--muted)}
+.trow{position:relative;display:flex;gap:8px;align-items:baseline;width:100%;font:inherit;color:inherit;background:none;border:0;padding:3px 4px;cursor:pointer;text-align:left;border-radius:3px}
+.trow:hover{outline:1px solid var(--rule)}
+.trow .bar{position:absolute;left:0;top:2px;bottom:2px;background:var(--bar);border-radius:2px;pointer-events:none}
+.trow .v{position:relative;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12.5px var(--mono)}
+.trow .v small{font-family:var(--sans);color:var(--muted);font-size:12px;margin-left:6px}
+.trow .n{position:relative;font-size:12.5px;color:var(--muted)}
+
+.ev-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.ev-actions{display:flex;gap:8px}
+/* Table panes scroll on their own so headers stay pinned, but once a pane reaches its top or bottom the wheel
+   carries on to the page (no overscroll containment). Capped so some page always shows around them. */
+.tablewrap{overflow:auto;max-height:calc(100vh - 230px);min-height:120px;border:1px solid var(--rule);border-radius:5px}
+table.ev{border-collapse:collapse;width:100%;font-size:13px}
+table.ev th{position:sticky;top:0;z-index:1;background:var(--soft);text-align:left;font-weight:600;padding:7px 10px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--rule),0 2px 4px rgba(0,0,0,.06)}
+.psize{display:inline-flex;align-items:center;gap:6px}
+.psize input{width:84px;font:13px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:4px 8px}
+.psize input:focus{border-color:var(--focus);outline:none;box-shadow:0 0 0 3px var(--bar)}
+.psize input[aria-invalid="true"]{border-color:var(--block)}
+table.ev td{padding:5px 10px;border-bottom:1px solid var(--rule);white-space:nowrap;max-width:380px;overflow:hidden;text-overflow:ellipsis}
+table.ev.fixed{table-layout:fixed}
+table.ev.fixed td{max-width:none}
+table.ev.fixed th{overflow:hidden;text-overflow:ellipsis}
+table.ev th{cursor:grab;user-select:none}
+table.ev th.dragging{opacity:.45}
+table.ev th.drop-before{box-shadow:inset 3px 0 0 var(--focus),inset 0 -1px 0 var(--rule)}
+table.ev th.drop-after{box-shadow:inset -3px 0 0 var(--focus),inset 0 -1px 0 var(--rule)}
+table.ev th .rs{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:col-resize;touch-action:none}
+table.ev th .rs::after{content:"";position:absolute;top:22%;bottom:22%;right:3px;width:2px;border-radius:1px;background:var(--rule)}
+table.ev th .rs:hover::after,body.col-resizing table.ev th .rs::after{background:var(--focus)}
+body.col-resizing{cursor:col-resize;user-select:none}
+table.ev tbody tr{cursor:pointer}
+table.ev tbody tr:hover{background:var(--soft)}
+table.ev tbody tr:focus-visible{outline-offset:-2px}
+td.m{font:12.5px var(--mono)}
+.act::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;background:var(--c,var(--other))}
+.v-allowed{--c:var(--allow)} .v-blocked{--c:var(--block)} .v-other{--c:var(--other)}
+.devs{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.dev{border:1px solid var(--rule);border-radius:6px;padding:14px 16px;background:var(--soft)}
+.dmodel{font-size:24px;font-weight:680;letter-spacing:-.02em;line-height:1.15;word-break:break-word}
+.dmodel.placeholder{color:var(--muted)}
+.dclass{color:var(--muted);margin:3px 0 12px;font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dev dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0 0 4px;font-size:13px}
+.dev dt{color:var(--muted)}
+.dev dd{margin:0;word-break:break-word}
+.dev dd.m{font:12.5px var(--mono)}
+.dnotes{margin:10px 0;padding:0;list-style:none;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.dnotes li::before{content:"Inferred: ";font-weight:600;color:var(--ink)}
+.skipped summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.skipped pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 var(--mono);background:var(--soft);border:1px solid var(--rule);border-radius:5px;padding:8px;margin:6px 0 0}
+.mxwrap{max-height:min(70vh,640px)}
+table.mx th{cursor:pointer}
+table.mx th.num,table.mx td.num{text-align:right}
+table.mx td.num{font-variant-numeric:tabular-nums}
+.pager{display:flex;gap:12px;align-items:center;justify-content:flex-end;margin-top:10px;font-size:13px;color:var(--muted)}
+
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);background:var(--panel);border-left:1px solid var(--rule);box-shadow:-10px 0 30px rgba(0,0,0,.18);overflow:auto;z-index:20;padding:16px 20px 32px}
+.drawer header{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.drawer .meta{margin:6px 0 12px;font-size:13px}
+.drawer .dacts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.kv{border-collapse:collapse;width:100%;font-size:12.5px}
+.kv th{text-align:left;font:12.5px var(--mono);color:var(--muted);font-weight:400;padding:3px 12px 3px 0;vertical-align:top;white-space:nowrap}
+.kv td{padding:1px 0}
+.kv button{font:12.5px var(--mono);color:var(--ink);background:none;border:0;padding:2px 4px;margin-left:-4px;border-radius:3px;cursor:pointer;text-align:left;word-break:break-all}
+.kv button:hover{background:var(--soft)}
+.drawer pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 var(--mono);background:var(--soft);border:1px solid var(--rule);border-radius:5px;padding:10px;margin:14px 0 0}
+
+#about{border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink);padding:18px 22px 22px;width:min(640px,calc(100vw - 32px));max-height:min(80vh,760px);overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+#about::backdrop{background:rgba(10,14,20,.45)}
+#about header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+#about h2{font-size:18px}
+#about h3{font-size:14px;font-weight:620;margin:18px 0 6px;padding-top:12px;border-top:1px solid var(--rule)}
+.about-meta{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0 0 8px;font-size:13px}
+.about-meta dt{color:var(--muted)}
+.about-meta dd{margin:0}
+.about-meta dd.m{font:12px var(--mono);word-break:break-all;user-select:all}
+.cl{margin-top:12px}
+.cl h4{margin:0 0 3px;font-size:13.5px;font-weight:650;display:flex;gap:10px;align-items:baseline}
+.cl h4 span{font-weight:400;color:var(--muted);font-size:12.5px}
+.cl ul{margin:0;padding-left:18px;font-size:13px}
+.cl li{margin:2px 0}
+
+.dhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.dhead .dmodel{flex:1;min-width:0}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{border-color:var(--rule);color:var(--ink)}
+.btn.danger{color:var(--block)}
+.btn.danger:hover{border-color:var(--block)}
+.rename-in{flex:1;min-width:0;font:600 18px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--focus);border-radius:5px;padding:4px 8px;box-shadow:0 0 0 3px var(--bar)}
+.renamed{font-size:12px;color:var(--muted);margin:3px 0 0}
+.sid{display:inline-block;font:11px var(--mono);border:1px solid var(--rule);border-radius:3px;padding:0 5px;margin-right:8px;color:var(--muted);vertical-align:1px}
+.src-acts{margin:10px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.status .note{color:var(--muted);font-size:13px}
+.progress{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;box-shadow:0 6px 20px rgba(0,0,0,.18);display:flex;gap:12px;align-items:center;z-index:30;font-size:13px;min-width:min(420px,90vw)}
+.pbar{flex:0 0 140px;height:6px;background:var(--soft);border-radius:3px;overflow:hidden}
+#pfill{height:100%;width:0;background:var(--focus)}
+.drop{position:fixed;inset:12px;border:3px dashed var(--focus);border-radius:12px;background:var(--shade);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:650;z-index:40;pointer-events:none}
+@media (max-width:640px){
+  .top,main{padding-left:14px;padding-right:14px}
+  .empty{margin:24px 14px;padding:22px}
+  .empty dl{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>FortiGate log triage</h1>
+    <p class="sub">Runs entirely in this browser tab. Files are never uploaded.</p>
+  </div>
+  <div class="actions">
+    <label class="btn primary" for="fileInput" tabindex="0" id="openLbl">Open log files</label>
+    <input id="fileInput" type="file" multiple hidden>
+    <button class="btn" id="sampleBtn" type="button">Load sample data</button>
+    <div class="seg" role="group" aria-label="Time zone for display">
+      <button type="button" data-tz="local" aria-pressed="true">Local time</button>
+      <button type="button" data-tz="utc" aria-pressed="false">UTC</button>
+    </div>
+    <button class="btn" id="summaryBtn" type="button" hidden title="Markdown summary for the case record: file hashes, scope, filters, log sources, leads and top flows">Export case summary</button>
+    <button class="btn" id="clearBtn" type="button" hidden>Clear all</button>
+    <button class="btn" id="aboutBtn" type="button" aria-haspopup="dialog" title="Version information and changelog">About <span id="toolVer"></span></button>
+  </div>
+</header>
+
+<section id="empty" class="empty">
+  <h2>Drop FortiGate logs anywhere on this page</h2>
+  <p>Or use Open log files. Parsing happens in this tab, and the page blocks all network requests, so customer data stays on this machine.</p>
+  <dl>
+    <dt>Reads</dt><dd>Format is detected line by line, so mixed files are fine: FortiGate key=value (syslog captures, GUI download), quoted CSV exports in the FortiAnalyzer style ("key=value","key=""value"""), FortiGate CEF, and .gz files.</dd>
+    <dt>Time</dt><dd>Uses eventtime (UTC epoch) when present, otherwise date + time + tz. Lines with no time zone are treated as UTC and flagged.</dd>
+    <dt>Limits</dt><dd>Everything is held in memory. A few hundred MB is fine in a desktop browser. Past 1.5 million events the rest are skipped and counted.</dd>
+    <dt>Try it</dt><dd>Load sample data shows a short intrusion story built from documentation-range IPs.</dd>
+  </dl>
+</section>
+
+<main id="main" hidden>
+  <div class="panel status" id="status"></div>
+
+  <section class="panel" aria-labelledby="devHead">
+    <div class="sec-head"><h2 id="devHead">Firewall in these logs</h2>
+      <p class="hint">Model is read from the serial number prefix in devid. Lines marked inferred are reasoning, not fact.</p></div>
+    <div id="devices" class="devs"></div>
+  </section>
+
+  <div class="filter">
+    <input id="q" type="search" spellcheck="false" autocomplete="off" aria-label="Filter"
+      placeholder='srcip=10.0.0.0/8 action=deny,blocked dstport=3389 "free text"'>
+    <button class="btn" id="applyBtn" type="button">Apply</button>
+    <button class="btn" id="helpBtn" type="button" aria-expanded="false" aria-controls="help">Syntax</button>
+  </div>
+  <div id="help" class="panel help" hidden>
+    <table>
+      <tr><td>field=value</td><td>Exact match, case-insensitive. Commas mean any of: <span class="mono">action=deny,blocked</span></td></tr>
+      <tr><td>field!=value</td><td>Exclude. <span class="mono">-field=value</span> does the same.</td></tr>
+      <tr><td>field~text</td><td>Field contains text: <span class="mono">url~login</span></td></tr>
+      <tr><td>field&gt;n, field&lt;n</td><td>Numeric compare: <span class="mono">sentbyte&gt;100000000</span></td></tr>
+      <tr><td>srcip=10.0.0.0/8</td><td>CIDR match on IPv4 values. Wildcards work too: <span class="mono">user=svc_*</span></td></tr>
+      <tr><td>ip= port= host= country=</td><td>Shortcuts that check source and destination fields together. <span class="mono">ip=</span> also checks remip.</td></tr>
+      <tr><td>file=</td><td>Source file name: <span class="mono">file="export 01.csv"</span></td></tr>
+      <tr><td>source=</td><td>A log source by its id from the source cards: <span class="mono">source=S2</span>, or <span class="mono">source!=S2</span> to exclude it.</td></tr>
+      <tr><td>kind= verdict=</td><td><span class="mono">kind=utm/ips</span> is type/subtype. <span class="mono">verdict=</span> is allowed, blocked or other.</td></tr>
+      <tr><td>"some text"</td><td>Searches the whole raw line. <span class="mono">-word</span> drops lines containing it.</td></tr>
+      <tr><td></td><td>Every term must match. Press Enter to apply.</td></tr>
+    </table>
+  </div>
+  <div id="chips" class="chips"></div>
+
+  <section class="panel">
+    <div class="tl-head">
+      <h2>Activity over time</h2>
+      <div class="legend">
+        <span style="--c:var(--block)">Blocked or failed</span>
+        <span style="--c:var(--allow)">Allowed traffic</span>
+        <span style="--c:var(--other)">Other events</span>
+      </div>
+      <button id="rangeReset" class="btn small" type="button" hidden>Clear time range</button>
+    </div>
+    <div class="tl-wrap"><canvas id="tl" aria-label="Event counts over time. Drag to select a time range."></canvas><div id="tlTip" class="tip" hidden></div></div>
+    <p class="hint">Drag across the chart to narrow the time range. Click a bar to select that interval.</p>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="sec-head"><h2>Leads worth a look</h2><p class="hint">Heuristics over the current selection. Each one is a question to verify against the logs, not a verdict.</p></div>
+      <div id="findings"></div>
+    </section>
+    <section class="panel">
+      <div class="sec-head"><h2>Top values</h2><p class="hint">Click a value to filter to it. Shift-click to exclude it, which is how you strip out known noise.</p></div>
+      <div id="tops" class="topgrid"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="ev-head">
+      <div><h2>Communication matrix</h2><p class="hint" style="margin-top:2px">Unique flows in the current selection, from traffic logs only. Click a heading to sort, drag it to move, drag its right edge to resize. Click a row to filter to that flow.</p></div>
+      <div class="ev-actions">
+        <button id="mxColReset" class="btn small" type="button" title="Restore the default column order and widths">Reset columns</button>
+        <button id="mxExport" class="btn small" type="button" title="Every flow in the current selection, not just the rows shown">Export matrix CSV</button>
+      </div>
+    </div>
+    <p id="mxInfo" class="hint" style="margin:0 0 8px"></p>
+    <div class="tablewrap" id="mxWrap"><table class="ev mx"><thead id="mxHead"></thead><tbody id="mxBody"></tbody></table></div>
+    <div class="pager">
+      <label class="psize" for="mxPageSize">Rows per page
+        <input id="mxPageSize" type="text" inputmode="numeric" list="pageSizes" value="100" autocomplete="off" title="Pick a size or type any number from 1 to 5,000, then press Enter">
+      </label>
+      <button id="mxPrev" class="btn small" type="button">Previous</button><span id="mxPageInfo"></span><button id="mxNext" class="btn small" type="button">Next</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="ev-head">
+      <div><h2>Events</h2><p class="hint" style="margin-top:2px">Drag a column header to move it. Drag its right edge to resize.</p></div>
+      <div class="ev-actions">
+        <button id="colReset" class="btn small" type="button" title="Restore the default column order and widths">Reset columns</button>
+        <button id="sortBtn" class="btn small" type="button">Newest first</button>
+        <button id="exportBtn" class="btn small" type="button">Export filtered CSV</button>
+      </div>
+    </div>
+    <div class="tablewrap" id="evWrap"><table class="ev"><thead id="evHead"></thead><tbody id="evBody"></tbody></table></div>
+    <div class="pager">
+      <label class="psize" for="pageSize">Rows per page
+        <input id="pageSize" type="text" inputmode="numeric" list="pageSizes" value="100" autocomplete="off" title="Pick a size or type any number from 1 to 5,000, then press Enter">
+      </label>
+      <datalist id="pageSizes"><option value="25"><option value="50"><option value="100"><option value="250"><option value="500"><option value="1000"><option value="2500"><option value="5000"></datalist>
+      <button id="prevBtn" class="btn small" type="button">Previous</button><span id="pageInfo"></span><button id="nextBtn" class="btn small" type="button">Next</button>
+    </div>
+  </section>
+</main>
+
+<div id="progress" class="progress" hidden role="status"><div class="pbar"><div id="pfill"></div></div><span id="ptext">Reading…</span></div>
+<div id="dropOverlay" class="drop" hidden>Drop to load</div>
+<aside id="drawer" class="drawer" hidden aria-label="Event details"></aside>
+<dialog id="about" aria-labelledby="aboutTitle">
+  <header><h2 id="aboutTitle">FortiGate log triage</h2><button class="btn small" type="button" id="aboutClose">Close</button></header>
+  <dl class="about-meta">
+    <dt>Version</dt><dd id="aboutVer"></dd>
+    <dt>Script SHA-256</dt><dd class="m" id="aboutFp"></dd>
+    <dt>Network</dt><dd>None. The page's security policy blocks every network request, and only the script whose hash is shown above is allowed to run.</dd>
+  </dl>
+  <p class="hint">The script hash is the fingerprint recorded in every case summary. It changes with any edit to the code, so it identifies exactly which build produced a summary.</p>
+  <h3>Changelog</h3>
+  <div id="changelog"></div>
+</dialog>
+
+<script>
+(function () {
+'use strict';
+
+/* ---------- small helpers ---------- */
+const TOOL_VERSION = '1.4.2';   // bump on every change committed to Git, and add a CHANGELOG entry
+// Newest first. Versions before 1.1.0 were assigned retrospectively when versioning was introduced.
+const CHANGELOG = [
+  ['1.4.2', '2026-10-13', ['Fix: scrolling no longer gets stuck in a table pane; once a pane reaches its top or bottom the wheel carries on scrolling the page. Table panes are a little shorter so the page around them stays reachable.']],
+  ['1.4.1', '2026-10-13', ['Source cards: Show only and Exclude are always shown (they were hidden when only one source was loaded) and sit on one row before Unload, with shorter labels.']],
+  ['1.4.0', '2026-10-13', [
+    'Log source cards: Rename gives a source your own name, used in the cards, the communication matrix and the case summary.',
+    'Log source cards: Exclude hides a source from every view (a source!= filter chip); Filter to this Log Source now uses the same source= id, so it works for unnamed sources too.',
+    'Log source cards: Unload removes a source from the session after confirmation. Files stay listed with hashes, and the status panel and case summary record what was unloaded.',
+    'Each source has a stable id (S1, S2 ...) shown on its card and usable in filters.']],
+  ['1.3.0', '2026-10-13', [
+    'Communication matrix: columns can be resized and moved by drag (Alt+Left/Right from the keyboard), Reset columns, and paging with a rows-per-page control, matching the Events table. Click a heading to sort as before.',
+    'Column handling shared between both tables (same code as the web access log triage tool).']],
+  ['1.2.0', '2026-10-13', ['About button with version, script fingerprint and changelog.']],
+  ['1.1.0', '2026-10-13', [
+    'Security hardening after code review and adversarial testing.',
+    'Lines over 64 KB are skipped and flagged; key=value parsing no longer slows quadratically on hostile input.',
+    'Case summary escapes all log-derived text and defangs URLs, so it cannot carry HTML or links into a ticketing system.',
+    'Lookup tables no longer inherit built-in properties; a filter that fails now says so instead of leaving stale results.',
+    'Content Security Policy pins the page script by SHA-256; injected or modified scripts are refused.',
+    'Hidden and direction-changing characters are shown as visible markers.',
+    'Version and script fingerprint recorded in the header and in every case summary.']],
+  ['1.0.0', '2026-10-13', [
+    'Communication matrix: unique flows with sessions, bytes, first/last seen and policy; sortable, click to filter, CSV export.',
+    'SHA-256 of every file computed while it loads, shown under Ingested log files.',
+    'Export case summary (Markdown): evidence hashes, scope and filters, data quality, log sources, leads, top flows.']],
+  ['0.6.0', '2026-10-13', [
+    'Filter to this Log Source on every source card, including sources with no hostname or serial.',
+    'Unnamed sources are kept separate per file and VDOM.',
+    'New file= filter.']],
+  ['0.5.0', '2026-10-13', [
+    'Event viewer columns can be resized and reordered by drag (Alt+Left/Right from the keyboard); Reset columns.',
+    'Summary header restyled; Detected time range label; Ingested log files list.',
+    'Source cards: hostname as heading, source file as subheading, model alongside serial. Model tier classification removed.']],
+  ['0.4.0', '2026-10-13', ['Event viewer page size selectable or typed (up to 5,000); column headers stay visible while scrolling.']],
+  ['0.3.0', '2026-10-13', [
+    'Traffic leads: inbound connections to published services (DNAT), DMZ reaching internal addresses, high-risk applications allowed.',
+    'Top values for VDOM, interface flow, service, app risk and NAT target; NAT shown in the destination column.',
+    'itime used as a last-resort timestamp.']],
+  ['0.2.0', '2026-10-13', [
+    'Log format detected per line: FortiGate key=value, FortiAnalyzer-style quoted CSV, CEF.',
+    'Firewall identification from the serial number, with inferred notes (FortiOS version, FortiAnalyzer origin, VDOM layout).',
+    'Detected formats per file, with a preview of unrecognised lines.']],
+  ['0.1.0', '2026-10-13', [
+    'Initial offline triage page: key=value, CEF and .gz input; activity timeline with time-range selection; filter language.',
+    'Top values, heuristic leads, event table with detail drawer, CSV export with formula neutralisation, built-in sample data.']]
+];
+const MAX_EVENTS = 1500000;
+const PAGE_MAX = 5000;  // rendering more rows than this at once makes the page sluggish
+const $ = id => document.getElementById(id);
+// Invisible and direction-changing characters (bidi overrides, zero-width, C0 controls) are shown as
+// visible markers wherever log text is displayed, so a value cannot visually impersonate another one.
+const CTRL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+const vis = s => String(s == null ? '' : s).replace(CTRL_RE, c => `⟦U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟧`);
+const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+// escA: attribute-safe, keeps the exact original value (used for data-* attributes that drive filtering)
+const escA = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => HTML_ESC[c]);
+// esc: for anything a human reads; escapes HTML and makes hidden characters visible
+const esc = s => escA(vis(s));
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const fmtN = n => Number(n).toLocaleString();
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+const tick = () => new Promise(r => setTimeout(r, 0));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function fmtBytes(b) {
+  if (!(b > 0)) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(b < 10 ? 2 : 1) : b) + ' ' + u[i];
+}
+
+const state = {
+  srcIds: new Map(), srcSeq: 0, labels: new Map(), renaming: null, unloaded: [], fileUnloaded: [],
+  longLines: 0, events: [], files: [], fileFmts: [], fileHash: [], fileSize: [], fileSkipped: [], fileErrors: [], skipped: 0, skippedSamples: [], noTime: 0, noTz: 0, truncated: 0,
+  tz: 'local', tokens: [], range: null, page: 0, pageSize: 100, newestFirst: true, tbl: { ev: { order: null, w: null }, mx: { order: null, w: null } }, devs: [], mx: [], mxSort: { k: 'n', dir: -1 }, mxPage: 0, mxPageSize: 100,
+  C: [], F: [], buckets: null, drag: null, filterError: '', cur: null
+};
+
+/* ---------- time display ---------- */
+function parts(ms) {
+  const d = new Date(ms), u = state.tz === 'utc';
+  return u ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()]
+           : [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()];
+}
+function fmtTime(ms) {
+  if (!isFinite(ms)) return 'no timestamp';
+  const [Y, M, D, h, m, s] = parts(ms);
+  return `${Y}-${pad(M)}-${pad(D)} ${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+function tzLabel() {
+  if (state.tz === 'utc') return 'UTC';
+  const off = -new Date().getTimezoneOffset(), a = Math.abs(off);
+  return `local, UTC${off >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+}
+
+/* ---------- parsing ---------- */
+// FortiGate native format: key=value pairs, values optionally double-quoted.
+// The lookbehind means a key can only start where the previous character is not part of a key, so a long run of
+// key-like characters is scanned once instead of once per position (that was quadratic on hostile input).
+const KV_RE = /(?<![\w.-])([A-Za-z_][\w.-]*)=("((?:[^"\\]|\\.)*)"|\S*)/g;
+function parseKV(line) {
+  const o = Object.create(null); let m, n = 0;
+  KV_RE.lastIndex = 0;
+  while ((m = KV_RE.exec(line))) {
+    o[m[1].toLowerCase()] = m[3] !== undefined ? m[3].replace(/\\"/g, '"') : m[2];
+    n++;
+  }
+  return n ? o : null;
+}
+
+// CEF: 7 pipe-delimited header fields then space-separated key=value extensions.
+// FortiGate prefixes its own fields with FTNTFGT; common CEF keys are mapped back to FortiGate names.
+const nullProto = o => Object.assign(Object.create(null), o);
+const CEF_MAP = nullProto({
+  src: 'srcip', dst: 'dstip', spt: 'srcport', dpt: 'dstport', act: 'action', out: 'sentbyte', in: 'rcvdbyte',
+  suser: 'user', duser: 'dstuser', deviceinboundinterface: 'srcintf', deviceoutboundinterface: 'dstintf',
+  request: 'url', dhost: 'hostname', shost: 'srcname', dvchost: 'devname', deviceexternalid: 'devid',
+  msg: 'msg', proto: 'proto', dvc: 'devip', fname: 'filename', reason: 'reason',
+  sourcetranslatedaddress: 'transip', destinationtranslatedaddress: 'tranip',
+  sourcetranslatedport: 'transport', destinationtranslatedport: 'tranport', requestclientapplication: 'agent'
+});
+const CEF_KEY_RE = /(?:^|\s)([A-Za-z0-9_.-]+)=/g;
+function parseCEF(line) {
+  const s = line.slice(line.indexOf('CEF:') + 4);
+  const hdr = []; let cur = '', i = 0;
+  for (; i < s.length && hdr.length < 7; i++) {
+    const c = s[i];
+    if (c === '\\' && i + 1 < s.length) { cur += s[++i]; continue; }
+    if (c === '|') { hdr.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  if (hdr.length < 7) return null;
+  const ext = s.slice(i);
+  const o = Object.assign(Object.create(null), { cefvendor: hdr[1], cefproduct: hdr[2], cefversion: hdr[3], cefsignature: hdr[4], cefname: hdr[5], cefseverity: hdr[6] });
+  const keys = []; let m;
+  CEF_KEY_RE.lastIndex = 0;
+  while ((m = CEF_KEY_RE.exec(ext))) keys.push({ k: m[1], ks: m.index, vs: m.index + m[0].length });
+  let cefApp;
+  for (let j = 0; j < keys.length; j++) {
+    const end = j + 1 < keys.length ? keys[j + 1].ks : ext.length;
+    const v = ext.slice(keys[j].vs, end).trim().replace(/\\=/g, '=').replace(/\\[nr]/g, ' ').replace(/\\\\/g, '\\');
+    const kl = keys[j].k.toLowerCase();
+    if (kl.startsWith('ftntfgt')) { o[kl.slice(7)] = v; continue; }
+    if (kl === 'app') { cefApp = v; continue; }
+    const mk = CEF_MAP[kl];
+    if (mk) { if (o[mk] === undefined) o[mk] = v; } else o[kl] = v;
+  }
+  if (o.cat && !o.type) { const [t, st] = o.cat.split(':'); o.type = t; if (st && !o.subtype) o.subtype = st; }
+  if (cefApp && !o.service) o.service = cefApp;   // FortiGate CEF puts the service name in app=
+  return o;
+}
+
+// FortiAnalyzer-style CSV export: every cell is "key=value", inner quotes doubled per RFC 4180,
+// e.g. "itime=1791774177","date=""2026-10-12""","",... Empty cells are ignored.
+function parseQuotedCsv(line) {
+  const o = Object.create(null); let i = 0, cnt = 0;
+  const n = line.length;
+  while (i < n) {
+    let cell = '';
+    if (line[i] === '"') {
+      i++;
+      while (i < n) {
+        const c = line[i];
+        if (c === '"') { if (line[i + 1] === '"') { cell += '"'; i += 2; continue; } i++; break; }
+        cell += c; i++;
+      }
+      while (i < n && line[i] !== ',') i++;
+    } else {
+      const j = line.indexOf(',', i), e = j < 0 ? n : j;
+      cell = line.slice(i, e); i = e;
+    }
+    i++;
+    const eq = cell.indexOf('=');
+    if (eq > 0) {
+      const k = cell.slice(0, eq).trim().toLowerCase();
+      let v = cell.slice(eq + 1);
+      if (v.length >= 2 && v[0] === '"' && v[v.length - 1] === '"') v = v.slice(1, -1);
+      if (/^[a-z_][\w.-]*$/.test(k)) { o[k] = v; cnt++; }
+    }
+  }
+  return cnt ? o : null;
+}
+const FMT_LABEL = { kv: 'FortiGate key=value (syslog or GUI download)', csv: 'Quoted CSV export (FortiAnalyzer style)', cef: 'FortiGate CEF' };
+const CSV_START = /^"[A-Za-z_][\w.-]*=/;
+function detectAndParse(line) {
+  if (line.indexOf('CEF:') !== -1) return ['cef', parseCEF(line)];
+  if (line.charCodeAt(0) === 34 && CSV_START.test(line)) return ['csv', parseQuotedCsv(line)];
+  return ['kv', parseKV(line)];
+}
+
+function eventTime(o) {
+  const v = o.eventtime;
+  if (v && /^\d{9,19}$/.test(v)) {
+    const n = Number(v);
+    if (v.length >= 18) return Math.floor(n / 1e6);   // nanoseconds
+    if (v.length >= 15) return Math.floor(n / 1e3);   // microseconds
+    if (v.length >= 12) return n;                     // milliseconds
+    return n * 1000;                                  // seconds
+  }
+  if (o.date && o.time) {
+    let s = o.date.replace(/\//g, '-') + 'T' + o.time;
+    const m = /^([+-])(\d{2}):?(\d{2})$/.exec(o.tz || '');
+    if (m) s += `${m[1]}${m[2]}:${m[3]}`; else { s += 'Z'; state.noTz++; }
+    const t = Date.parse(s);
+    if (!isNaN(t)) return t;
+  }
+  for (const k of ['rt', 'start', 'devtime', 'itime']) {
+    const x = o[k]; if (!x) continue;
+    if (/^\d{10}$/.test(x)) return Number(x) * 1000;
+    if (/^\d{13}$/.test(x)) return Number(x);
+    const t = Date.parse(x); if (!isNaN(t)) return t;
+  }
+  return NaN;
+}
+
+const BLOCK_ACT = /^(deny|denied|block|blocked|drop|dropped|reset|reject|rejected)$|fail/i;
+function verdictOf(o) {
+  if (BLOCK_ACT.test(o.action || '') || /^fail/i.test(o.status || '') || (o.utmaction || '').toLowerCase() === 'block') return 'blocked';
+  if ((o.type || '').toLowerCase() === 'traffic') return 'allowed';
+  return 'other';
+}
+
+// FortiGate log lines are a few KB at most. Anything far longer is corrupt or hostile: count it, don't parse it.
+const MAX_LINE = 65536;
+function skipLine(line, fileIdx, why) {
+  state.skipped++; state.fileSkipped[fileIdx]++;
+  if (why === 'long') state.longLines++;
+  if (state.skippedSamples.length < 3) state.skippedSamples.push(line.length > 300 ? line.slice(0, 300) + '…' : line);
+}
+function ingestLine(line, fileIdx) {
+  if (!line) return;
+  if (line.length > MAX_LINE) { skipLine(line, fileIdx, 'long'); return; }
+  if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+  if (!line.trim()) return;
+  const [fmt, o] = detectAndParse(line);
+  if (!o || !(o.logid || o.type || o.eventtime || (o.date && o.time))) {
+    state.skipped++; state.fileSkipped[fileIdx]++;
+    if (state.skippedSamples.length < 3) state.skippedSamples.push(line.length > 300 ? line.slice(0, 300) + '…' : line);
+    return;
+  }
+  const fc = state.fileFmts[fileIdx]; fc[fmt] = (fc[fmt] || 0) + 1;
+  if (state.events.length >= MAX_EVENTS) { state.truncated++; return; }
+  const ntz0 = state.noTz;
+  o.$t = eventTime(o);
+  if (state.noTz !== ntz0) o.$ntz = 1;      // remembered per event so counts stay right after an unload
+  if (isNaN(o.$t)) state.noTime++;
+  o.$v = verdictOf(o);
+  o.$k = (o.type || '?') + '/' + (o.subtype || '?');
+  if (o.srcintfrole || o.dstintfrole || o.srcintf || o.dstintf)
+    o.$flow = `${o.srcintfrole || o.srcintf || '?'} → ${o.dstintfrole || o.dstintf || '?'}`;
+  o.$raw = line;
+  o.$f = fileIdx;
+  o.$fmt = fmt;
+  o.$file = state.files[fileIdx];
+  state.events.push(o);
+}
+
+/* Streaming SHA-256 in plain JS. Works on file:// with no secure-context requirement and
+   never holds the whole file in memory. Verified against standard test vectors and Python hashlib. */
+const SHA_K = new Int32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,
+  0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,
+  0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,
+  0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,
+  0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+class Sha256 {
+  constructor() {
+    this.h = new Int32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+    this.w = new Int32Array(64); this.buf = new Uint8Array(64); this.len = 0; this.total = 0;
+  }
+  block(d, o) {
+    const w = this.w, K = SHA_K, H = this.h;
+    for (let t = 0; t < 16; t++, o += 4) w[t] = (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
+    for (let t = 16; t < 64; t++) {
+      const x = w[t - 15], y = w[t - 2];
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d0 = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (let t = 0; t < 64; t++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[t] + w[t]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d0 + t1) | 0; d0 = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d0) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  update(data) {
+    let i = 0; const n = data.length; this.total += n;
+    if (this.len) {
+      const take = Math.min(64 - this.len, n);
+      this.buf.set(data.subarray(0, take), this.len); this.len += take; i = take;
+      if (this.len < 64) return;
+      this.block(this.buf, 0); this.len = 0;
+    }
+    for (; i + 64 <= n; i += 64) this.block(data, i);
+    if (i < n) { this.buf.set(data.subarray(i), 0); this.len = n - i; }
+  }
+  hex() {
+    const bits = this.total * 8, padLen = (this.len < 56 ? 56 - this.len : 120 - this.len) + 8;
+    const p = new Uint8Array(padLen); p[0] = 0x80;
+    const hi = Math.floor(bits / 4294967296), lo = bits >>> 0;
+    p[padLen - 8] = hi >>> 24; p[padLen - 7] = hi >>> 16; p[padLen - 6] = hi >>> 8; p[padLen - 5] = hi;
+    p[padLen - 4] = lo >>> 24; p[padLen - 3] = lo >>> 16; p[padLen - 2] = lo >>> 8; p[padLen - 1] = lo;
+    this.update(p);
+    return [...this.h].map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+}
+
+async function readFile(file, idx) {
+  // One read of the file feeds both the hash (bytes exactly as received) and the parser.
+  const [forHash, forParse] = file.stream().tee();
+  const hasher = new Sha256();
+  const hashing = (async () => {
+    const r = forHash.getReader();
+    for (;;) { const { done, value } = await r.read(); if (done) break; hasher.update(value); }
+    state.fileHash[idx] = hasher.hex();
+  })().catch(err => { state.fileErrors.push(`${file.name}: hashing failed (${err.message || err})`); });
+  try { await parseStream(forParse, file, idx); }
+  finally { await hashing; }
+}
+async function parseStream(stream, file, idx) {
+  const gz = /\.gz$/i.test(file.name);
+  if (gz) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('this browser cannot decompress .gz; extract it first');
+    stream = stream.pipeThrough(new DecompressionStream('gzip'));
+  }
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '', read = 0, last = performance.now(), dropping = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.length;
+    if (dropping) {   // inside an oversized line: discard until its newline
+      const nl = value.indexOf('\n');
+      if (nl < 0) continue;
+      dropping = false; buf = value.slice(nl + 1);
+    } else buf += value;
+    const cut = buf.lastIndexOf('\n');
+    if (cut < 0) {
+      if (buf.length > MAX_LINE) { skipLine(buf, idx, 'long'); buf = ''; dropping = true; }
+      continue;
+    }
+    const lines = buf.slice(0, cut).split('\n');
+    buf = buf.slice(cut + 1);
+    for (let i = 0; i < lines.length; i++) ingestLine(lines[i], idx);
+    if (performance.now() - last > 80) {
+      setProgress(gz ? null : Math.min(read / (file.size || 1), 1), `Reading ${file.name}: ${fmtN(state.events.length)} events`);
+      await tick(); last = performance.now();
+    }
+  }
+  if (buf) ingestLine(buf, idx);
+}
+
+async function loadFiles(list) {
+  const files = [...list];
+  if (!files.length) return;
+  closeDrawer();
+  showProgress(true);
+  for (const file of files) {
+    const idx = state.files.length; state.files.push(file.name); state.fileFmts.push({});
+    state.fileSize.push(file.size); state.fileHash.push(''); state.fileSkipped.push(0); state.fileUnloaded.push(0);
+    setProgress(0, `Reading ${file.name}`); await tick();
+    try { await readFile(file, idx); }
+    catch (err) { state.fileErrors.push(`${file.name}: ${err.message || err}`); }
+  }
+  setProgress(1, `Sorting ${fmtN(state.events.length)} events`); await tick();
+  state.events.sort((a, b) => {
+    const x = a.$t, y = b.$t;
+    if (x === x) return y === y ? x - y : -1;
+    return y === y ? 1 : 0;
+  });
+  setProgress(1, 'Building views'); await tick();
+  $('empty').hidden = true; $('main').hidden = false; $('clearBtn').hidden = false; $('summaryBtn').hidden = false;
+  state.range = null;
+  renderDevices();
+  applyFilters();
+  showProgress(false);
+}
+
+function showProgress(on) { $('progress').hidden = !on; }
+function setProgress(frac, text) {
+  $('pfill').style.width = frac == null ? '100%' : Math.round(frac * 100) + '%';
+  $('pfill').style.opacity = frac == null ? '.4' : '1';
+  $('ptext').textContent = vis(text);
+}
+
+/* ---------- filtering ---------- */
+const TOKEN_RE = /(?:[^\s"]+|"[^"]*")+/g;
+const CL_RE = /^(-?)([A-Za-z_$][\w.$-]*?)(!=|>=|<=|=|~|>|<)([\s\S]*)$/;
+const ALIAS = nullProto({
+  source: ['$srcId'], file: ['$file'], flow: ['$flow'], ip: ['srcip', 'dstip', 'remip', 'tranip'], port: ['srcport', 'dstport'], host: ['hostname', 'devname', 'srcname'],
+  country: ['srccountry', 'dstcountry'], kind: ['$k'], verdict: ['$v']
+});
+function tokenize(q) { return (q.match(TOKEN_RE) || []).filter(Boolean); }
+function parseToken(tok) {
+  const m = CL_RE.exec(tok);
+  if (m) {
+    const raw = m[4], quoted = raw.startsWith('"');
+    const val = raw.replace(/"/g, '');
+    return { kind: 'field', neg: m[1] === '-', field: m[2].toLowerCase(), op: m[3], quoted,
+             values: quoted ? [val] : val.split(',').map(s => s.trim()) };
+  }
+  const neg = tok.length > 1 && tok[0] === '-';
+  const text = (neg ? tok.slice(1) : tok).replace(/"/g, '');
+  return text ? { kind: 'text', neg, text } : null;
+}
+function ip4(s) {
+  const p = String(s).split('.'); if (p.length !== 4) return null;
+  let n = 0;
+  for (const x of p) { if (!/^\d{1,3}$/.test(x)) return null; const v = +x; if (v > 255) return null; n = n * 256 + v; }
+  return n;
+}
+function cidrMatch(ip, cidr) {
+  const [base, bits] = cidr.split('/');
+  const b = ip4(base), i = ip4(ip), m = Number(bits);
+  if (b == null || i == null || !(m >= 0 && m <= 32)) return false;
+  const div = 2 ** (32 - m);
+  return Math.floor(i / div) === Math.floor(b / div);
+}
+function compile(cl) {
+  if (cl.kind === 'text') {
+    const re = new RegExp(escRe(cl.text), 'i');
+    return cl.neg ? o => !re.test(o.$raw) : o => re.test(o.$raw);
+  }
+  const fields = ALIAS[cl.field] || [cl.field];
+  let test;
+  if (cl.op === '=' || cl.op === '!=') {
+    const testers = cl.values.map(v => {
+      const vl = v.toLowerCase();
+      if (vl === '') return x => x === undefined || x === '';
+      if (!cl.quoted && /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(vl)) return x => x !== undefined && cidrMatch(x, vl);
+      if (!cl.quoted && vl.includes('*')) {
+        const re = new RegExp('^' + vl.split('*').map(escRe).join('.*') + '$', 'i');
+        return x => x !== undefined && re.test(x);
+      }
+      return x => x !== undefined && String(x).toLowerCase() === vl;
+    });
+    test = o => {
+      for (const f of fields) { const x = o[f]; for (const t of testers) if (t(x)) return true; }
+      return false;
+    };
+  } else if (cl.op === '~') {
+    const vals = cl.values.map(v => v.toLowerCase()).filter(Boolean);
+    if (!vals.length) return `"${cl.field}~" needs some text after the ~`;
+    test = o => {
+      for (const f of fields) {
+        const x = o[f]; if (x === undefined) continue;
+        const xl = String(x).toLowerCase();
+        for (const v of vals) if (xl.includes(v)) return true;
+      }
+      return false;
+    };
+  } else {
+    const n = Number(cl.values[0]);
+    if (cl.values[0] === '' || isNaN(n)) return `"${cl.field}${cl.op}${cl.values[0]}" needs a number`;
+    const cmp = { '>': (a, b) => a > b, '<': (a, b) => a < b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b }[cl.op];
+    test = o => {
+      for (const f of fields) { const r = o[f]; if (r === undefined || r === '') continue; const x = Number(r); if (!isNaN(x) && cmp(x, n)) return true; }
+      return false;
+    };
+  }
+  const neg = cl.neg !== (cl.op === '!=');
+  return neg ? o => !test(o) : test;
+}
+
+function applyFilters(opts = {}) {
+  if (!opts.keepC) {
+    state.filterError = '';
+    const preds = [];
+    for (const tok of state.tokens) {
+      const cl = parseToken(tok); if (!cl) continue;
+      let p;
+      try { p = compile(cl); } catch (err) { p = `"${tok}" could not be applied (${err.message || err})`; }
+      if (typeof p === 'string') { state.filterError = p; continue; }
+      preds.push(p);
+    }
+    const ev = state.events;
+    try {
+      if (preds.length) {
+        const out = [];
+        outer: for (let i = 0; i < ev.length; i++) {
+          const o = ev[i];
+          for (let j = 0; j < preds.length; j++) if (!preds[j](o)) continue outer;
+          out.push(o);
+        }
+        state.C = out;
+      } else state.C = ev;
+    } catch (err) {
+      // never leave stale results on screen looking like a filtered view
+      state.C = []; state.filterError = `Filter failed and nothing is shown: ${err.message || err}`;
+    }
+    state.buckets = buildBuckets(state.C);
+  }
+  const r = state.range;
+  state.F = r ? state.C.filter(o => o.$t >= r[0] && o.$t < r[1]) : state.C;
+  state.page = 0;
+  renderAll();
+}
+
+function makeToken(field, value, exclude) {
+  const f = field === '$k' ? 'kind' : field === '$v' ? 'verdict' : field === '$flow' ? 'flow' : field;
+  const v = String(value).replace(/"/g, '');
+  const q = /[\s,*]/.test(v) || v === '' ? `"${v}"` : v;
+  return `${f}${exclude ? '!=' : '='}${q}`;
+}
+function addTokens(toks) {
+  for (const t of toks) {
+    const opposite = t.includes('!=') ? t.replace('!=', '=') : t.replace('=', '!=');
+    state.tokens = state.tokens.filter(x => x !== opposite);
+    if (!state.tokens.includes(t)) state.tokens.push(t);
+  }
+  $('q').value = state.tokens.join(' ');
+  applyFilters();
+}
+
+/* ---------- timeline ---------- */
+const STEPS = [1e3, 5e3, 1e4, 3e4, 6e4, 3e5, 6e5, 9e5, 18e5, 36e5, 108e5, 216e5, 432e5, 864e5, 6048e5];
+const TL = { padL: 50, padR: 10, padT: 10, padB: 24, H: 160 };
+function buildBuckets(C) {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < C.length; i++) { const t = C[i].$t; if (t === t) { if (t < lo) lo = t; if (t > hi) hi = t; } }
+  if (lo === Infinity) return null;
+  let step = STEPS[STEPS.length - 1];
+  for (const s of STEPS) if ((hi - lo) / s <= 180) { step = s; break; }
+  // align hour+ buckets to the displayed time zone
+  const off = step >= 36e5 && state.tz === 'local' ? -new Date(lo).getTimezoneOffset() * 6e4 : 0;
+  const start = Math.floor((lo + off) / step) * step - off;
+  const n = Math.max(1, Math.floor((hi - start) / step) + 1);
+  const a = new Uint32Array(n), b = new Uint32Array(n), c = new Uint32Array(n);
+  for (let i = 0; i < C.length; i++) {
+    const o = C[i], t = o.$t; if (!(t >= start)) continue;
+    const k = Math.min(n - 1, Math.floor((t - start) / step));
+    if (o.$v === 'blocked') b[k]++; else if (o.$v === 'allowed') a[k]++; else c[k]++;
+  }
+  return { start, step, n, a, b, c };
+}
+function tlGeom() {
+  const W = $('tl').clientWidth, pw = Math.max(10, W - TL.padL - TL.padR), B = state.buckets;
+  return { W, pw, bw: B ? pw / B.n : 0 };
+}
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function tickLabel(t, step, span) {
+  const [, M, D, h, m, s] = parts(t);
+  if (step >= 864e5) return `${pad(M)}-${pad(D)}`;
+  const hm = `${pad(h)}:${pad(m)}`;
+  if (span > 864e5) return `${pad(M)}-${pad(D)} ${hm}`;
+  return step < 6e4 ? `${hm}:${pad(s)}` : hm;
+}
+function drawTimeline() {
+  const cv = $('tl'); if ($('main').hidden) return;
+  const dpr = window.devicePixelRatio || 1, { W, pw, bw } = tlGeom(), H = TL.H;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const ph = H - TL.padT - TL.padB, B = state.buckets;
+  const col = { a: cssVar('--allow'), b: cssVar('--block'), c: cssVar('--other'), rule: cssVar('--rule'), muted: cssVar('--muted'), focus: cssVar('--focus'), shade: cssVar('--shade') };
+  g.font = '11px ' + cssVar('--sans'); g.fillStyle = col.muted;
+  if (!B) { g.fillText('No timestamped events in this selection.', TL.padL, H / 2); $('rangeReset').hidden = !state.range; return; }
+  let max = 1;
+  for (let i = 0; i < B.n; i++) { const s = B.a[i] + B.b[i] + B.c[i]; if (s > max) max = s; }
+  // grid
+  g.strokeStyle = col.rule; g.lineWidth = 1; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const f of [0, 0.5, 1]) {
+    const y = Math.round(TL.padT + ph - f * ph) + 0.5;
+    g.beginPath(); g.moveTo(TL.padL, y); g.lineTo(TL.padL + pw, y); g.stroke();
+    g.fillText(fmtN(Math.round(max * f)), TL.padL - 6, y);
+  }
+  // bars, blocked on the baseline so it's comparable bucket to bucket
+  const gap = bw > 4 ? 1 : 0;
+  for (let i = 0; i < B.n; i++) {
+    const x = TL.padL + i * bw, w = Math.max(1, bw - gap);
+    let y = TL.padT + ph;
+    for (const [v, c] of [[B.b[i], col.b], [B.a[i], col.a], [B.c[i], col.c]]) {
+      if (!v) continue;
+      const h = Math.max(1, v / max * ph);
+      g.fillStyle = c; g.fillRect(x, y - h, w, h); y -= h;
+    }
+  }
+  // x labels
+  g.fillStyle = col.muted; g.textAlign = 'center'; g.textBaseline = 'top';
+  const span = B.n * B.step, every = Math.max(1, Math.ceil(B.n / Math.max(2, Math.floor(pw / 115))));
+  for (let i = 0; i < B.n; i += every) {
+    const x = TL.padL + i * bw;
+    g.fillText(tickLabel(B.start + i * B.step, B.step, span), clamp(x, TL.padL + 30, TL.padL + pw - 30), TL.padT + ph + 6);
+  }
+  // selection
+  let sel = null;
+  if (state.drag) sel = [Math.min(state.drag.x0, state.drag.x1), Math.max(state.drag.x0, state.drag.x1)];
+  else if (state.range) sel = [TL.padL + (state.range[0] - B.start) / B.step * bw, TL.padL + (state.range[1] - B.start) / B.step * bw];
+  if (sel) {
+    const x0 = clamp(sel[0], TL.padL, TL.padL + pw), x1 = clamp(sel[1], TL.padL, TL.padL + pw);
+    g.fillStyle = col.shade;
+    g.fillRect(TL.padL, TL.padT, x0 - TL.padL, ph);
+    g.fillRect(x1, TL.padT, TL.padL + pw - x1, ph);
+    g.strokeStyle = col.focus; g.lineWidth = 1.5;
+    g.strokeRect(x0, TL.padT + 0.5, Math.max(1, x1 - x0), ph - 1);
+  }
+  $('rangeReset').hidden = !state.range;
+}
+function bucketAt(x) {
+  const B = state.buckets, { bw } = tlGeom();
+  return clamp(Math.floor((x - TL.padL) / bw), 0, B.n - 1);
+}
+function setupTimeline() {
+  const cv = $('tl'), tip = $('tlTip');
+  const xOf = e => e.clientX - cv.getBoundingClientRect().left;
+  cv.addEventListener('pointerdown', e => {
+    if (!state.buckets) return;
+    const { pw } = tlGeom(), x = clamp(xOf(e), TL.padL, TL.padL + pw - 0.01);
+    state.drag = { x0: x, x1: x }; tip.hidden = true;
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', e => {
+    const B = state.buckets; if (!B) return;
+    const { pw } = tlGeom(), x = xOf(e);
+    if (state.drag) { state.drag.x1 = clamp(x, TL.padL, TL.padL + pw - 0.01); drawTimeline(); return; }
+    if (x < TL.padL || x > TL.padL + pw) { tip.hidden = true; return; }
+    const i = bucketAt(x), t0 = B.start + i * B.step;
+    tip.innerHTML = `<strong>${esc(fmtTime(t0))}</strong> to ${esc(fmtTime(t0 + B.step))}<br>
+      Blocked or failed: ${fmtN(B.b[i])}<br>Allowed traffic: ${fmtN(B.a[i])}<br>Other events: ${fmtN(B.c[i])}`;
+    tip.hidden = false;
+    const wrapW = cv.clientWidth, tw = tip.offsetWidth;
+    tip.style.left = clamp(x + 14, 0, wrapW - tw) + 'px';
+    tip.style.top = '8px';
+  });
+  const finish = () => {
+    const d = state.drag; if (!d) return;
+    state.drag = null;
+    const B = state.buckets;
+    let i0 = bucketAt(Math.min(d.x0, d.x1)), i1 = bucketAt(Math.max(d.x0, d.x1));
+    if (Math.abs(d.x1 - d.x0) < 4) i1 = i0;
+    state.range = [B.start + i0 * B.step, B.start + (i1 + 1) * B.step];
+    applyFilters({ keepC: true });
+  };
+  cv.addEventListener('pointerup', finish);
+  cv.addEventListener('pointercancel', () => { state.drag = null; drawTimeline(); });
+  cv.addEventListener('pointerleave', () => { if (!state.drag) tip.hidden = true; });
+}
+
+/* ---------- leads ---------- */
+function isPrivate(ip) {
+  if (!ip) return true;
+  if (ip.includes(':')) { const l = ip.toLowerCase(); return l === '::1' || l.startsWith('fe80') || l.startsWith('fc') || l.startsWith('fd'); }
+  const p = ip.split('.').map(Number); if (p.length !== 4 || p.some(isNaN)) return true;
+  const [a, b] = p;
+  return a === 10 || a === 127 || a === 0 || a >= 224 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+         (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+}
+const ipFromUi = ui => { const m = /\(([0-9a-f.:]+)\)/i.exec(ui || ''); return m ? m[1] : ''; };
+function bump(map, key, init) { let r = map.get(key); if (!r) { r = init(); map.set(key, r); } r.n++; return r; }
+const NOT_BLOCKED = a => !/^(drop|dropped|block|blocked|reset|deny|denied|clear_session)$/i.test(a);
+
+function computeLeads(F) {
+  const adminFail = new Map(), adminOk = new Set(), authFail = new Map(), authOk = new Map();
+  const ips = new Map(), av = new Map(), web = new Map(), cfg = new Map();
+  const ports = new Map(), hosts = new Map(), xfer = new Map(), pub = new Map(), dmz = new Map(), risky = new Map();
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i];
+    const typ = (o.type || '').toLowerCase(), sub = (o.subtype || '').toLowerCase();
+    const ld = o.logdesc || '', act = (o.action || '').toLowerCase(), st = (o.status || '').toLowerCase();
+    if (typ === 'traffic') {
+      const s = o.srcip;
+      if (s) {
+        if (o.dstport) { let set = ports.get(s); if (!set) ports.set(s, set = new Set()); if (set.size < 1024) set.add(o.dstport); }
+        if (o.dstip && isPrivate(o.dstip)) { let set = hosts.get(s); if (!set) hosts.set(s, set = new Set()); if (set.size < 2048) set.add(o.dstip); }
+        const sb = Number(o.sentbyte);
+        if (sb > 0 && o.dstip && isPrivate(s) && !isPrivate(o.dstip)) {
+          const r = bump(xfer, s + ' → ' + o.dstip, () => ({ n: 0, b: 0, src: s, dst: o.dstip, country: o.dstcountry }));
+          r.b += sb;
+        }
+      }
+      // inbound to published services (destination NAT)
+      if ((o.trandisp === 'dnat' || o.trandisp === 'snat+dnat') && o.tranip) {
+        const key = hostPort(o.tranip, o.tranport || o.dstport);
+        const r = bump(pub, key, () => ({ n: 0, ip: o.tranip, port: o.tranport || '', srcs: new Set(), ctry: new Map(), blocked: 0, ext: hostPort(o.dstip, o.dstport) }));
+        if (s && r.srcs.size < 5000) r.srcs.add(s);
+        if (o.srccountry) r.ctry.set(o.srccountry, (r.ctry.get(o.srccountry) || 0) + 1);
+        if (o.$v === 'blocked') r.blocked++;
+      }
+      // DMZ reaching internal addresses
+      const sr = (o.srcintfrole || '').toLowerCase(), dr = (o.dstintfrole || '').toLowerCase();
+      if (sr === 'dmz' && o.$v === 'allowed' && dr !== 'wan' && dr !== 'dmz' && o.dstip && isPrivate(o.dstip)) {
+        const r = bump(dmz, `${s}|${o.dstport || ''}`, () => ({ n: 0, s, p: o.dstport || '', dsts: new Set(), svc: o.service || '', pol: o.policyname || o.policyid || '' }));
+        if (r.dsts.size < 2048) r.dsts.add(o.dstip);
+      }
+      // risky applications allowed
+      const ar = (o.apprisk || '').toLowerCase();
+      if ((ar === 'high' || ar === 'critical') && o.$v === 'allowed' && o.app) {
+        const r = bump(risky, o.app, () => ({ n: 0, risk: ar, srcs: new Set() }));
+        if (s && r.srcs.size < 500) r.srcs.add(s);
+      }
+      continue;
+    }
+    if (/admin login/i.test(ld) || (act === 'login' && sub === 'system')) {
+      const src = o.srcip || ipFromUi(o.ui) || '?', user = o.user || '?';
+      if (/fail/i.test(ld) || /fail/.test(st)) {
+        const r = bump(adminFail, user + '|' + src, () => ({ n: 0, user, src, first: o.$t }));
+        r.last = o.$t;
+      } else if (/success/i.test(ld) || st === 'success') adminOk.add(src);
+      continue;
+    }
+    if (sub === 'vpn' || sub === 'user' || /vpn/i.test(ld)) {
+      const src = o.remip || o.srcip;
+      if (src) {
+        const failed = /fail/.test(act) || /fail/i.test(ld) || /^fail/.test(st);
+        const ok = !failed && (/tunnel-up/.test(act) || /tunnel up|login success|authentication success/i.test(ld) ||
+                   (st === 'success' && /auth|login/i.test(act + ' ' + ld)));
+        if (failed) {
+          const r = bump(authFail, src, () => ({ n: 0, src, users: new Set(), first: o.$t }));
+          if (o.user && r.users.size < 500) r.users.add(o.user);
+          r.last = o.$t;
+        } else if (ok) {
+          let set = authOk.get(src); if (!set) authOk.set(src, set = new Set());
+          set.add(o.user || '?');
+        }
+      }
+    }
+    if (sub === 'ips' || sub === 'anomaly' || o.attack) {
+      const r = bump(ips, o.attack || o.msg || 'unnamed signature', () => ({ n: 0, srcs: new Set(), acts: new Set(), sev: o.severity || o.crlevel || '' }));
+      if (o.srcip && r.srcs.size < 500) r.srcs.add(o.srcip);
+      r.acts.add(act || '?');
+    }
+    if (sub === 'virus' || o.virus) {
+      const r = bump(av, o.virus || o.msg || 'unnamed', () => ({ n: 0, acts: new Set(), hosts: new Set() }));
+      r.acts.add(act || '?');
+      if (o.srcip && r.hosts.size < 200) r.hosts.add(o.srcip);
+      if (o.dstip && r.hosts.size < 200) r.hosts.add(o.dstip);
+    }
+    if (sub === 'webfilter' && o.$v === 'blocked') bump(web, o.catdesc || o.cat || 'uncategorised', () => ({ n: 0 }));
+    if (sub === 'system' && (o.cfgpath || /configured|config change|object .*(add|delet|edit)/i.test(ld)) && !/login|logout/i.test(ld)) {
+      const r = bump(cfg, o.user || '?', () => ({ n: 0, paths: new Map(), srcs: new Set() }));
+      if (o.cfgpath) r.paths.set(o.cfgpath, (r.paths.get(o.cfgpath) || 0) + 1);
+      const s = o.srcip || ipFromUi(o.ui); if (s) r.srcs.add(s);
+    }
+  }
+
+  const L = [];
+  const top = (arr, k, by) => arr.sort((a, b) => by(b) - by(a)).slice(0, k);
+  const span = r => (isFinite(r.first) && isFinite(r.last) && r.last > r.first) ? ` over ${humanDur(r.last - r.first)}` : '';
+
+  const comp = [...authFail.values()].filter(r => authOk.has(r.src));
+  if (comp.length) L.push({ level: 'first', title: 'Failed authentication, then success from the same source',
+    why: 'The pattern a successful password spray or brute force leaves behind. Confirm the success came after the failures, then check that account everywhere else it can sign in.',
+    rows: top(comp, 8, r => r.n).map(r => ({ k: r.src, d: `${fmtN(r.n)} failures across ${fmtN(r.users.size)} usernames, then success as ${[...authOk.get(r.src)].slice(0, 4).join(', ')}`, t: [`ip=${r.src}`] })) });
+
+  const af = [...authFail.values()];
+  if (af.length) L.push({ level: af.some(r => r.n >= 20 || r.users.size >= 5) ? 'first' : 'review', title: 'VPN and user authentication failures by source',
+    why: 'Many usernames from one source suggests spraying; many attempts on one username suggests brute force or a stale saved password.',
+    rows: top(af, 8, r => r.n).map(r => ({ k: r.src, d: `${fmtN(r.n)} failures, ${fmtN(r.users.size)} usernames${span(r)}${isPrivate(r.src) ? ', internal source' : ''}`, t: [`ip=${r.src}`] })) });
+
+  const adm = [...adminFail.values()];
+  if (adm.length) L.push({ level: adm.some(r => !isPrivate(r.src) || adminOk.has(r.src)) ? 'first' : 'review', title: 'Failed logins to FortiGate management',
+    why: 'Admin access attempts. Management should not be reachable from the internet, and a later success from the same source needs explaining.',
+    rows: top(adm, 8, r => r.n).map(r => ({ k: `${r.user} from ${r.src}`, d: `${fmtN(r.n)} failures${span(r)}${adminOk.has(r.src) ? ', later succeeded from this source' : ''}`, t: [`user=${r.user}`, 'kind=event/system'] })) });
+
+  if (cfg.size) L.push({ level: 'review', title: 'Configuration changes',
+    why: 'Who changed the firewall and what they touched. Each change should match an approved change record.',
+    rows: top([...cfg.entries()], 8, e => e[1].n).map(([u, r]) => ({ k: u, d: `${fmtN(r.n)} changes${r.srcs.size ? ' from ' + [...r.srcs].slice(0, 3).join(', ') : ''}${r.paths.size ? '; ' + [...r.paths.keys()].slice(0, 3).join(', ') : ''}`, t: [`user=${u}`, 'kind=event/system', 'logdesc~configured'] })) });
+
+  if (ips.size) {
+    const arr = [...ips.entries()];
+    L.push({ level: arr.some(([, r]) => [...r.acts].some(NOT_BLOCKED)) ? 'first' : 'review', title: 'Intrusion prevention hits',
+      why: 'Signatures that fired. Anything detected or passed rather than dropped got through and deserves a look first.',
+      rows: top(arr, 8, e => e[1].n).map(([a, r]) => ({ k: a, d: `${fmtN(r.n)} hits, ${fmtN(r.srcs.size)} sources, action ${[...r.acts].join('/')}${r.sev ? ', ' + r.sev : ''}`, t: [`attack="${a}"`] })) });
+  }
+  if (av.size) {
+    const arr = [...av.entries()];
+    L.push({ level: arr.some(([, r]) => [...r.acts].some(NOT_BLOCKED)) ? 'first' : 'review', title: 'Antivirus detections',
+      why: 'Check the action. Monitored or passthrough means the file reached the host, so pivot to that endpoint in Defender.',
+      rows: top(arr, 8, e => e[1].n).map(([v, r]) => ({ k: v, d: `${fmtN(r.n)} detections, action ${[...r.acts].join('/')}, hosts ${[...r.hosts].slice(0, 3).join(', ')}`, t: [`virus="${v}"`] })) });
+  }
+
+  const scans = [...ports.entries()].filter(([, s]) => s.size >= 50);
+  if (scans.length) L.push({ level: scans.some(([s]) => isPrivate(s)) ? 'first' : 'review', title: 'Possible port scans',
+    why: 'One source touching 50 or more destination ports. Internet noise against the WAN is routine; an internal source scanning is not.',
+    rows: top(scans, 8, e => e[1].size).map(([s, set]) => ({ k: s, d: `${set.size >= 1024 ? '1,024+' : fmtN(set.size)} destination ports${isPrivate(s) ? ', internal source' : ''}`, t: [`srcip=${s}`] })) });
+
+  const sweeps = [...hosts.entries()].filter(([, s]) => s.size >= 50);
+  if (sweeps.length) L.push({ level: 'first', title: 'Possible internal host sweeps',
+    why: 'One source reaching 50 or more internal hosts. Expect this from scanners, management and backup servers; anything else is discovery until proven otherwise.',
+    rows: top(sweeps, 8, e => e[1].size).map(([s, set]) => ({ k: s, d: `${set.size >= 2048 ? '2,048+' : fmtN(set.size)} internal hosts${isPrivate(s) ? '' : ', external source'}`, t: [`srcip=${s}`] })) });
+
+  if (xfer.size) L.push({ level: 'review', title: 'Largest transfers to external addresses',
+    why: 'Biggest outbound volumes by source and destination pair. Most will be backups, updates or cloud sync; the odd one out is your exfiltration question.',
+    rows: top([...xfer.values()], 8, r => r.b).map(r => ({ k: `${r.src} → ${r.dst}`, d: `${fmtBytes(r.b)} sent over ${fmtN(r.n)} sessions${r.country ? ', ' + r.country : ''}`, t: [`srcip=${r.src}`, `dstip=${r.dst}`] })) });
+
+  if (pub.size) L.push({ level: 'review', title: 'Inbound connections to published services',
+    why: 'Traffic destination-NATed from outside to internal servers. Each target is an exposed service: confirm it should be, and that the sources and countries make sense for it.',
+    rows: top([...pub.values()], 8, r => r.n).map(r => {
+      const c = [...r.ctry.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]).join(', ');
+      return { k: `${r.ext} → ${hostPort(r.ip, r.port)}`, d: `${fmtN(r.n)} sessions, ${fmtN(r.srcs.size)} sources${c ? ', mostly ' + c : ''}${r.blocked ? `, ${fmtN(r.blocked)} blocked` : ''}`, t: [`tranip=${r.ip}`].concat(r.port ? [`tranport=${r.port}`] : []) };
+    }) });
+
+  if (dmz.size) L.push({ level: 'review', title: 'DMZ reaching internal addresses',
+    why: 'Allowed sessions from DMZ-role interfaces to private addresses outside the DMZ. Each pair should map to a documented rule; the DMZ exists so a compromised host there cannot do this freely.',
+    rows: top([...dmz.values()], 8, r => r.n).map(r => {
+      const ds = [...r.dsts], one = ds.length === 1;
+      return { k: `${r.s} → ${one ? hostPort(ds[0], r.p) : `${fmtN(ds.length)} internal hosts${r.p ? ' on port ' + r.p : ''}`}`,
+        d: `${fmtN(r.n)} sessions${r.svc ? ', ' + r.svc : ''}${r.pol ? ', policy ' + r.pol : ''}${one ? '' : '; e.g. ' + ds.slice(0, 3).join(', ')}`,
+        t: ['srcintfrole=dmz', `srcip=${r.s}`].concat(r.p ? [`dstport=${r.p}`] : []).concat(one ? [`dstip=${ds[0]}`] : []) };
+    }) });
+
+  if (risky.size) L.push({ level: 'review', title: 'High-risk applications allowed',
+    why: 'Applications FortiGuard rates high or critical risk that policy let through. Usually remote access, P2P or proxy tools: check they are sanctioned.',
+    rows: top([...risky.entries()], 8, e => e[1].n).map(([a, r]) => ({ k: a, d: `${fmtN(r.n)} sessions, ${fmtN(r.srcs.size)} sources, ${r.risk} risk`, t: ['verdict=allowed', `app="${a}"`] })) });
+
+  if (web.size) L.push({ level: 'review', title: 'Blocked web categories',
+    why: 'What web filtering stopped. Repeated malicious or phishing blocks from one host often mean something on it keeps trying.',
+    rows: top([...web.entries()], 6, e => e[1].n).map(([c, r]) => ({ k: c, d: `${fmtN(r.n)} blocks`, t: ['kind=utm/webfilter', 'verdict=blocked', `catdesc="${c}"`] })) });
+
+  L.sort((a, b) => (a.level === 'first' ? 0 : 1) - (b.level === 'first' ? 0 : 1));
+  return L;
+}
+function humanDur(ms) {
+  const m = Math.round(ms / 6e4);
+  if (m < 1) return `${Math.max(1, Math.round(ms / 1e3))} seconds`;
+  if (m < 120) return `${m} minutes`;
+  const h = m / 60; if (h < 48) return `${h.toFixed(1)} hours`;
+  return `${(h / 24).toFixed(1)} days`;
+}
+
+/* ---------- top values ---------- */
+const TOP_FIELDS = [
+  ['srcip', 'Source IP'], ['dstip', 'Destination IP'], ['dstport', 'Destination port'], ['action', 'Action'],
+  ['$k', 'Log type'], ['policyid', 'Policy'], ['user', 'User'], ['app', 'Application'],
+  ['srccountry', 'Source country'], ['dstcountry', 'Destination country'], ['logdesc', 'Event description'], ['devname', 'Device'],
+  ['vd', 'VDOM'], ['$flow', 'Interface flow (role or name)'], ['service', 'Service'], ['apprisk', 'App risk'], ['tranip', 'NAT target (tranip)']
+];
+function topK(map, k) {
+  const out = [];
+  for (const [v, n] of map) {
+    if (out.length < k) { out.push([v, n]); out.sort((a, b) => b[1] - a[1]); }
+    else if (n > out[k - 1][1]) { out[k - 1] = [v, n]; out.sort((a, b) => b[1] - a[1]); }
+  }
+  return out;
+}
+function renderTops() {
+  const F = state.F, maps = TOP_FIELDS.map(() => new Map()), svc = new Map(), pol = new Map();
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i];
+    for (let j = 0; j < TOP_FIELDS.length; j++) {
+      const v = o[TOP_FIELDS[j][0]];
+      if (v !== undefined && v !== '') { const m = maps[j]; m.set(v, (m.get(v) || 0) + 1); }
+    }
+    if (o.dstport && o.service && !svc.has(o.dstport)) svc.set(o.dstport, o.service);
+    if (o.policyid && o.policyname && !pol.has(o.policyid)) pol.set(o.policyid, o.policyname);
+  }
+  const total = F.length || 1, html = [];
+  TOP_FIELDS.forEach(([f, label], j) => {
+    const m = maps[j]; if (!m.size) return;
+    const rows = topK(m, 10), max = rows[0][1];
+    html.push(`<div class="tcard"><header><h3>${esc(label)}</h3><span>${fmtN(m.size)} distinct</span></header>` +
+      rows.map(([v, n]) => {
+        const note = f === 'dstport' ? svc.get(v) : f === 'policyid' ? (v === '0' ? 'implicit deny' : pol.get(v)) : '';
+        return `<button class="trow" type="button" data-f="${escA(f)}" data-v="${escA(v)}" title="${esc(v)}: ${fmtN(n)} (${(n / total * 100).toFixed(1)}%)">
+          <span class="bar" style="width:${(n / max * 100).toFixed(1)}%"></span>
+          <span class="v">${esc(v)}${note ? `<small>${esc(note)}</small>` : ''}</span><span class="n">${fmtN(n)}</span></button>`;
+      }).join('') + '</div>');
+  });
+  $('tops').innerHTML = html.join('') || '<p class="none">No values to summarise in this selection.</p>';
+}
+
+/* ---------- device identification ---------- */
+function identifyDevice(sn) {
+  if (!sn) return null;
+  const s = sn.toUpperCase(); let m;
+  if (/^FG(T)?VM/.test(s)) return 'FortiGate-VM';
+  if ((m = /^FWF(\d{2,3})([A-Z])/.exec(s))) return `FortiWiFi ${+m[1]}${m[2]}`;
+  if ((m = /^FGR(\d{2,3})([A-Z])/.exec(s))) return `FortiGate Rugged ${+m[1]}${m[2]}`;
+  if ((m = /^FG(?:T)?(\d{2,4})([A-Z])/.exec(s))) return `FortiGate ${+m[1]}${m[2]}`;
+  return `Not recognised (serial prefix ${s.slice(0, 6)})`;
+}
+function fosFromLogver(v) {
+  if (!/^\d{9,10}$/.test(v || '')) return '';
+  const s = v.padStart(10, '0'), maj = +s.slice(0, 2), min = +s.slice(2, 4), pat = +s.slice(4, 6);
+  if (maj < 5 || maj > 9) return '';
+  return `${maj}.${min}.${pat} build ${s.slice(6)}`;
+}
+function computeDevices() {
+  const map = new Map();
+  for (let i = 0; i < state.events.length; i++) {
+    const o = state.events[i], key = o.devid || o.devname || `\u0000${o.$f}\u0000${o.vd || ''}`;
+    let d = map.get(key);
+    if (!d) map.set(key, d = { sid: sourceIdFor(key), anon: !o.devid && !o.devname, anonVd: o.vd || '', anonFile: o.$file, sn: o.devid || '', files: new Set(), names: new Set(), vds: new Set(), lv: new Set(), fmts: new Set(), ptypes: new Set(), itime: false, n: 0 });
+    d.n++;
+    if (o.devname && d.names.size < 10) d.names.add(o.devname);
+    if (o.vd && d.vds.size < 50) d.vds.add(o.vd);
+    if (o.logver && d.lv.size < 5) d.lv.add(o.logver);
+    if (o.policytype) d.ptypes.add(o.policytype);
+    if (o.itime) d.itime = true;
+    d.fmts.add(o.$fmt);
+    d.files.add(o.$f);
+    o.$srcId = d.sid;
+  }
+  const devs = [...map.values()].sort((a, b) => b.n - a.n);
+  for (const d of devs) {
+    d.model = identifyDevice(d.sn) || 'Unknown: no serial (devid) in these logs';
+    d.host = [...d.names].join(', ') || 'Hostname not in logs';
+    d.srcFiles = [...d.files].map(i => state.files[i]).join(', ');
+    const fos = [...d.lv].map(fosFromLogver).filter(Boolean);
+    const notes = d.notes = [];
+    if (fos.length) notes.push(`running FortiOS ${fos.join(', ')}, decoded from the logver field. Confirm on the device.`);
+    if (d.itime) notes.push('an itime field is present, so these logs most likely came out of FortiAnalyzer rather than straight off the firewall.');
+    if (d.ptypes.has('security-policy')) notes.push('security-policy entries suggest this VDOM runs in policy-based (NGFW policy) mode.');
+    const nonRoot = [...d.vds].filter(v => v !== 'root');
+    if (nonRoot.length) notes.push(`non-root VDOM names (${nonRoot.slice(0, 3).join(', ')}) suggest a multi-VDOM build, possibly one VDOM per customer.`);
+    if (!d.sn && !d.names.size) notes.push('no devname either, so syslog may have been relayed or trimmed before it reached you.');
+    // unnamed sources: no devid and no devname, from this file (and this VDOM when there is one)
+    d.toks = d.sn ? [`devid=${d.sn}`]
+      : !d.anon ? [makeToken('devname', [...d.names][0])]
+      : [makeToken('file', d.anonFile), 'devid=""', 'devname=""'].concat(d.anonVd ? [makeToken('vd', d.anonVd)] : ['vd=""']);
+  }
+  state.devs = devs;
+}
+function renderDevices() {
+  computeDevices();
+  const devs = state.devs;
+  $('devHead').textContent = devs.length > 1 ? `Firewalls in these logs (${devs.length})` : 'Firewall in these logs';
+  $('devices').innerHTML = devs.slice(0, 12).map(d => {
+    const notes = d.notes;
+    return `<div class="dev">
+      ${sourceCardHead(d.sid, d.host, !d.names.size)}
+      <p class="dclass" title="${esc(d.srcFiles)}"><span class="sid" title="Source id, usable in filters: source=${d.sid}">${d.sid}</span>${esc(d.srcFiles)}</p>
+      <dl>
+        <dt>Model</dt><dd>${esc(d.model)}</dd>
+        <dt>Serial</dt><dd class="m">${esc(d.sn || 'not in logs')}</dd>
+        <dt>VDOMs</dt><dd class="m">${esc([...d.vds].slice(0, 8).join(', ') || 'not in logs')}${d.vds.size > 8 ? ' …' : ''}</dd>
+        <dt>Events</dt><dd>${fmtN(d.n)}</dd>
+        <dt>Format</dt><dd>${esc([...d.fmts].map(f => FMT_LABEL[f]).join(', '))}</dd>
+      </dl>
+      ${notes.length ? `<ul class="dnotes">${notes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${sourceCardActions(d.sid, devs.length > 1, 'Filter to this Log Source', d.n)}
+    </div>`;
+  }).join('') + (devs.length > 12 ? `<p class="none">${fmtN(devs.length - 12)} more devices not shown. Use the Device top values below.</p>` : '');
+}
+
+
+/* ---------- log source controls: rename, filter, exclude, unload ---------- */
+// Source ids (S1, S2 ...) are stable for the session, so filters keep working after a rename or an unload.
+function sourceIdFor(key) { let id = state.srcIds.get(key); if (!id) { id = 'S' + (++state.srcSeq); state.srcIds.set(key, id); } return id; }
+const labelOf = (sid, fallback) => state.labels.get(sid) || fallback;
+function sourceCardHead(sid, original, placeholder) {
+  const label = state.labels.get(sid);
+  if (state.renaming === sid) return `<div class="dhead"><input class="rename-in" type="text" maxlength="80" value="${escA(label || (placeholder ? '' : original))}" placeholder="${escA(original)}" aria-label="Custom name for ${escA(sid)}" data-sid="${escA(sid)}">
+      <button class="btn small" type="button" data-act="rename-save" data-sid="${escA(sid)}">Save</button><button class="btn small" type="button" data-act="rename-cancel" data-sid="${escA(sid)}">Cancel</button></div>
+      <p class="renamed">Leave empty to go back to the name from the logs.</p>`;
+  return `<div class="dhead"><p class="dmodel${label || !placeholder ? '' : ' placeholder'}">${esc(label || original)}</p>
+      <button class="btn small ghost" type="button" data-act="rename" data-sid="${escA(sid)}" title="Give this source your own name. It is used across this page and in the case summary.">Rename</button></div>
+      ${label ? `<p class="renamed">Renamed by you; name in the logs: ${esc(original)}</p>` : ''}`;
+}
+function sourceCardActions(sid, many, filterLabel, n) {
+  // Always shown, even with a single source: both are ordinary filter chips and are undone by removing the chip.
+  return `<div class="dacts src-acts">
+    <button class="btn small" type="button" data-act="src-filter" data-sid="${escA(sid)}" title="Show only this ${escA(SRC.noun)}'s ${escA(SRC.unit)} (adds a source=${escA(sid)} filter)">Show only</button>
+    <button class="btn small" type="button" data-act="src-exclude" data-sid="${escA(sid)}" title="Hide this ${escA(SRC.noun)}'s ${escA(SRC.unit)} from every view (adds a source!=${escA(sid)} filter). Remove the chip to bring them back.">Exclude</button>
+    <button class="btn small danger" type="button" data-act="src-unload" data-sid="${escA(sid)}" title="Remove this ${escA(SRC.noun)}'s ${fmtN(n)} ${escA(SRC.unit)} from this session">Unload…</button>
+  </div>`;
+}
+function saveRename(sid, raw) {
+  const d = SRC.list().find(x => x.sid === sid); if (!d) return;
+  const v = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (v && v !== SRC.original(d)) state.labels.set(sid, v); else state.labels.delete(sid);
+  state.renaming = null;
+  SRC.render(); applyFilters({ keepC: true });       // labels also appear in tables and the summary
+}
+function unloadSource(sid) {
+  const d = SRC.list().find(x => x.sid === sid); if (!d) return;
+  const name = labelOf(sid, SRC.original(d));
+  if (!confirm(`Unload "${vis(name)}" (${sid})?\n\nIts ${fmtN(d.n)} ${SRC.unit} are removed from this session. The file stays listed with its hash, and the case summary records the unload. Load the file again to bring them back.`)) return;
+  const keep = []; let removed = 0;
+  for (const o of state.events) {
+    if (o.$srcId === sid) {
+      removed++;
+      const fc = state.fileFmts[o.$f]; if (fc[o.$fmt] > 1) fc[o.$fmt]--; else delete fc[o.$fmt];
+      state.fileUnloaded[o.$f] = (state.fileUnloaded[o.$f] || 0) + 1;
+    } else keep.push(o);
+  }
+  state.events = keep;
+  state.unloaded.push({ sid, name, n: removed, files: SRC.files(d) });
+  state.labels.delete(sid);
+  const re = new RegExp(`^-?source!?=${sid}$`, 'i');
+  state.tokens = state.tokens.filter(t => !re.test(t)); $('q').value = state.tokens.join(' ');
+  state.noTime = 0; state.noTz = 0;
+  for (const o of keep) { if (isNaN(o.$t)) state.noTime++; if (o.$ntz) state.noTz++; }
+  closeDrawer();
+  if (!keep.length) { resetAll(); return; }
+  if (SRC.recompute) SRC.recompute();
+  SRC.render(); applyFilters();
+}
+function unloadedNotes() {
+  return state.unloaded.map(u => `Unloaded from this session: ${u.name} (${u.sid}), ${fmtN(u.n)} ${SRC.unit} from ${u.files}.`);
+}
+function setupSourceCards(containerId) {
+  const box = $(containerId);
+  box.addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const sid = b.dataset.sid, act = b.dataset.act;
+    if (act === 'rename') {
+      state.renaming = sid; SRC.render();
+      const inp = box.querySelector(`input.rename-in[data-sid="${sid}"]`); if (inp) { inp.focus(); inp.select(); }
+    } else if (act === 'rename-save') saveRename(sid, box.querySelector(`input.rename-in[data-sid="${sid}"]`).value);
+    else if (act === 'rename-cancel') { state.renaming = null; SRC.render(); }
+    else if (act === 'src-filter') addTokens([`source=${sid}`]);
+    else if (act === 'src-exclude') addTokens([`source!=${sid}`]);
+    else if (act === 'src-unload') unloadSource(sid);
+  });
+  box.addEventListener('keydown', e => {
+    const inp = e.target.closest('input.rename-in'); if (!inp) return;
+    if (e.key === 'Enter') { e.preventDefault(); saveRename(inp.dataset.sid, inp.value); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); state.renaming = null; SRC.render(); }
+  });
+}
+const SRC = { list: () => state.devs, original: d => d.host, files: d => d.srcFiles, render: renderDevices, unit: 'events', noun: 'log source' };
+
+/* ---------- rendering ---------- */
+function renderStatus() {
+  const F = state.F, total = state.events.length;
+  let lo = NaN, hi = NaN;
+  for (let i = 0; i < F.length; i++) if (isFinite(F[i].$t)) { lo = F[i].$t; break; }
+  for (let i = F.length - 1; i >= 0; i--) if (isFinite(F[i].$t)) { hi = F[i].$t; break; }
+  const lines = [`<p class="st-count">${fmtN(F.length)} of ${fmtN(total)} events shown, from ${fmtN(state.files.length)} file${state.files.length === 1 ? '' : 's'}</p>`,
+    isFinite(lo) ? `<p class="st-range"><span class="st-label">Detected time range:</span> ${esc(fmtTime(lo))} to ${esc(fmtTime(hi))} <span class="muted">(${esc(tzLabel())})</span></p>` : '<p class="st-range"><span class="st-label">Detected time range:</span> <span class="muted">no timestamped events in this selection</span></p>'];
+  const w = getWarnings();
+  const rowsHtml = ['<span class="if-h">File</span><span class="if-h">Format</span><span class="if-h if-n">Events</span><span class="if-h">SHA-256</span>'];
+  state.files.forEach((f, i) => {
+    const c = Object.entries(state.fileFmts[i] || {});
+    const hash = `<span class="if-hash" title="SHA-256 of the file bytes as loaded">${esc(state.fileHash[i] || 'not computed')}</span>`;
+    if (!c.length) rowsHtml.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt${state.fileUnloaded[i] ? '' : ' warn'}">${state.fileUnloaded[i] ? 'Nothing left loaded' : 'No recognised lines'}</span><span class="if-n">0</span>${hash}`);
+    c.forEach(([k, n], j) => rowsHtml.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt">${esc(FMT_LABEL[k])}</span><span class="if-n">${fmtN(n)} events</span>${j === 0 ? hash : '<span></span>'}`));
+    if (state.fileUnloaded[i]) rowsHtml.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt">Unloaded by you</span><span class="if-n">${fmtN(state.fileUnloaded[i])} events</span><span></span>`);
+  });
+  lines.push(`<div class="ingested"><h3>Ingested log files</h3><div class="if-grid">${rowsHtml.join('')}</div></div>`);
+  for (const x of unloadedNotes()) lines.push(`<div class="note">${esc(x)}</div>`);
+  for (const x of w) lines.push(`<div class="warn">${esc(x)}</div>`);
+  if (state.skippedSamples.length) lines.push(`<details class="skipped"><summary>Show the first unrecognised lines</summary><pre>${esc(state.skippedSamples.join('\n'))}</pre></details>`);
+  $('status').innerHTML = lines.join('');
+}
+function getWarnings() {
+  const w = [];
+  if (state.longLines) w.push(`${fmtN(state.longLines)} line${state.longLines === 1 ? ' was' : 's were'} longer than ${fmtN(MAX_LINE)} characters and not parsed. Real FortiGate lines are far shorter, so treat the file as corrupt or tampered until explained.`);
+  if (state.skipped) w.push(`${fmtN(state.skipped)} line${state.skipped === 1 ? ' was' : 's were'} not recognised as FortiGate logs and skipped.`);
+  if (state.noTime) w.push(`${fmtN(state.noTime)} event${state.noTime === 1 ? ' has' : 's have'} no usable timestamp; they appear in the table but not the chart.`);
+  if (state.noTz) w.push(`${fmtN(state.noTz)} event${state.noTz === 1 ? '' : 's'} had date and time but no tz field, so they were read as UTC. Check the device time zone before building a timeline.`);
+  if (state.truncated) w.push(`Memory cap reached: ${fmtN(state.truncated)} further events were not loaded. Split the file or filter at source.`);
+  for (const e of state.fileErrors) w.push(`Could not read ${e}`);
+  return w;
+}
+function renderChips() {
+  const h = state.tokens.map((t, i) => {
+    const neg = t.includes('!=') || t.startsWith('-');
+    return `<span class="chip${neg ? ' neg' : ''}">${esc(t)}<button type="button" data-i="${i}" aria-label="Remove ${esc(t)}">×</button></span>`;
+  });
+  if (state.range) h.push(`<span class="chip time">${esc(fmtTime(state.range[0]))} to ${esc(fmtTime(state.range[1]))}<button type="button" data-range="1" aria-label="Clear time range">×</button></span>`);
+  if (state.filterError) h.push(`<span class="ferr">Ignored: ${esc(state.filterError)}</span>`);
+  $('chips').innerHTML = h.join('');
+}
+function renderFindings() {
+  const L = computeLeads(state.F);
+  $('findings').innerHTML = L.length ? L.map(f => `<div class="finding ${f.level}">
+      <header><h3>${esc(f.title)}</h3><span class="lvl">${f.level === 'first' ? 'Look first' : 'Review'}</span></header>
+      <p class="why">${esc(f.why)}</p>
+      ${f.rows.map(r => `<button class="frow" type="button" data-t="${escA(JSON.stringify(r.t))}"><span class="k">${esc(r.k)}</span><span class="d">${esc(r.d)}</span></button>`).join('')}
+    </div>`).join('')
+    : '<p class="none">No leads from the built-in checks in this selection. These checks are narrow, so no lead is not the same as no problem.</p>';
+}
+const hostPort = (h, p) => !h ? '' : (h.includes(':') ? `[${h}]` : h) + (p ? ':' + p : '');
+const COLS = [
+  ['Time', o => fmtTime(o.$t), 'm'],
+  ['Device / VDOM', o => { const d = o.devname || o.devid || ''; return o.vd && o.vd !== 'root' ? (d ? `${d} / ${o.vd}` : o.vd) : d; }],
+  ['Type', o => o.$k],
+  ['Action', o => o.action || '', 'act'],
+  ['Source', o => hostPort(o.srcip || o.remip, o.srcport), 'm'],
+  ['Destination', o => hostPort(o.dstip, o.dstport) + ((o.trandisp === 'dnat' || o.trandisp === 'snat+dnat') && o.tranip ? ' → ' + hostPort(o.tranip, o.tranport) : ''), 'm'],
+  ['Service / app', o => [o.service, o.app].filter(Boolean).join(' / ')],
+  ['Policy', o => o.policyid || '', 'm'],
+  ['User', o => o.user || ''],
+  ['Detail', o => o.logdesc || o.attack || o.virus || o.msg || o.url || o.hostname || o.policyname || '']
+];
+function renderTable() {
+  const F = state.F, n = F.length, PAGE = state.pageSize, pages = Math.max(1, Math.ceil(n / PAGE));
+  state.page = clamp(state.page, 0, pages - 1);
+  const order = colOrder('ev', COLS);
+  $('evHead').innerHTML = '<tr>' + order.map(ci => {
+    const h = COLS[ci][0];
+    return headCell('ev', ci, `${esc(h)}${h === 'Time' ? ` <span class="muted">(${esc(tzLabel())})</span>` : ''}`, '', '',
+      'Drag to move. Drag the right edge to resize. Alt+Left/Right also moves.');
+  }).join('') + '</tr>';
+  applyColWidths('ev', $('evHead'), COLS);
+  const rows = [], s = state.page * PAGE;
+  for (let k = 0; k < PAGE; k++) {
+    const pos = s + k; if (pos >= n) break;
+    const idx = state.newestFirst ? n - 1 - pos : pos, o = F[idx];
+    rows.push(`<tr tabindex="0" data-i="${idx}">` + order.map(ci => {
+      const [, fn, cls] = COLS[ci], v = fn(o);
+      const c = cls === 'act' ? `act v-${o.$v}` : cls || '';
+      return `<td${c ? ` class="${c}"` : ''} title="${esc(v)}">${esc(v)}</td>`;
+    }).join('') + '</tr>');
+  }
+  $('evBody').innerHTML = rows.join('') || `<tr><td colspan="${COLS.length}" class="muted">No events match. Remove a filter above or clear the time range.</td></tr>`;
+  $('pageInfo').textContent = n ? `Rows ${fmtN(s + 1)} to ${fmtN(Math.min(s + PAGE, n))} of ${fmtN(n)}` : '0 rows';
+  $('prevBtn').disabled = state.page === 0;
+  $('nextBtn').disabled = state.page >= pages - 1;
+  $('sortBtn').textContent = state.newestFirst ? 'Newest first' : 'Oldest first';
+  $('exportBtn').disabled = !n;
+}
+const colState = k => state.tbl[k];
+const colOrder = (k, cols) => colState(k).order || cols.map((_, i) => i);
+function headCell(k, ci, inner, cls, extraAttrs, title) {
+  const cs = colState(k), w = cs.w ? ` style="width:${cs.w[ci]}px"` : '';
+  return `<th data-c="${ci}" draggable="true" tabindex="0"${w} class="${cls || ''}"${extraAttrs || ''} title="${escA(title)}">${inner}<span class="rs" aria-hidden="true"></span></th>`;
+}
+function applyColWidths(k, head, cols) {
+  const t = head.closest('table'), cs = colState(k);
+  if (!cs.w) { t.classList.remove('fixed'); t.style.width = ''; return; }
+  t.classList.add('fixed');
+  t.style.width = colOrder(k, cols).reduce((a, ci) => a + cs.w[ci], 0) + 'px';
+}
+// Resize by the right-edge grip, move by drag (or Alt+Left/Right), optional activate (click / Enter / Space).
+function setupColumns(k, headId, cols, render, resetId, onActivate) {
+  const head = $(headId), cs = colState(k);
+  let rs = null, dragC = null, justResized = false;
+  const clearMarks = () => head.querySelectorAll('th').forEach(th => th.classList.remove('drop-before', 'drop-after', 'dragging'));
+  const moveCol = (from, to, after) => {
+    const order = colOrder(k, cols).filter(c => c !== from);
+    let at = order.indexOf(to); if (at < 0) return; if (after) at++;
+    order.splice(at, 0, from); cs.order = order; render();
+  };
+  head.addEventListener('pointerdown', e => {
+    const h = e.target.closest('.rs'); if (!h) return;
+    e.preventDefault(); e.stopPropagation();
+    const th = h.parentElement;
+    if (!cs.w) {
+      const w = cols.map(() => 120);
+      head.querySelectorAll('th').forEach(x => { w[+x.dataset.c] = Math.round(x.getBoundingClientRect().width); x.style.width = w[+x.dataset.c] + 'px'; });
+      cs.w = w; applyColWidths(k, head, cols);
+    }
+    rs = { c: +th.dataset.c, x: e.clientX, w: cs.w[+th.dataset.c], th };
+    h.setPointerCapture(e.pointerId); document.body.classList.add('col-resizing');
+  });
+  head.addEventListener('pointermove', e => {
+    if (!rs) return;
+    const w = Math.max(48, Math.round(rs.w + e.clientX - rs.x));
+    cs.w[rs.c] = w; rs.th.style.width = w + 'px'; applyColWidths(k, head, cols);
+  });
+  // The click that the browser fires at the end of a resize gesture must not sort; a later deliberate click must.
+  const endRs = () => { if (rs) { rs = null; justResized = true; setTimeout(() => { justResized = false; }, 0); document.body.classList.remove('col-resizing'); } };
+  head.addEventListener('pointerup', endRs); head.addEventListener('pointercancel', endRs);
+  head.addEventListener('dragstart', e => {
+    const th = e.target.closest('th');
+    if (rs || !th || e.target.closest('.rs')) { e.preventDefault(); return; }
+    dragC = +th.dataset.c; th.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragC));
+  });
+  head.addEventListener('dragover', e => {
+    const th = e.target.closest('th'); if (dragC === null || !th) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    const r = th.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+    head.querySelectorAll('th').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    if (+th.dataset.c !== dragC) th.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  head.addEventListener('drop', e => {
+    const th = e.target.closest('th'); if (dragC === null || !th) return;
+    e.preventDefault(); e.stopPropagation();
+    const to = +th.dataset.c, r = th.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2, from = dragC;
+    dragC = null; clearMarks(); if (to !== from) moveCol(from, to, after);
+  });
+  head.addEventListener('dragend', () => { dragC = null; clearMarks(); });
+  head.addEventListener('click', e => {
+    if (!onActivate || e.target.closest('.rs') || justResized) return;
+    const th = e.target.closest('th'); if (th) onActivate(th);
+  });
+  head.addEventListener('keydown', e => {
+    const th = e.target.closest('th'); if (!th) return;
+    if (onActivate && !e.altKey && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onActivate(th); head.querySelector(`th[data-c="${th.dataset.c}"]`).focus(); return; }
+    if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+    e.preventDefault();
+    const order = colOrder(k, cols), c = +th.dataset.c, i = order.indexOf(c), j = e.key === 'ArrowLeft' ? i - 1 : i + 1;
+    if (j < 0 || j >= order.length) return;
+    moveCol(c, order[j], e.key === 'ArrowRight');
+    head.querySelector(`th[data-c="${c}"]`).focus();
+  });
+  $(resetId).addEventListener('click', () => { cs.order = null; cs.w = null; render(); });
+}
+/* ---------- communication matrix ---------- */
+const PROTO = nullProto({ '1': 'ICMP', '6': 'TCP', '17': 'UDP', '47': 'GRE', '50': 'ESP', '58': 'ICMPv6', '132': 'SCTP' });
+const srcLabel = o => {
+  const lb = state.labels.get(o.$srcId); if (lb) return lb;
+  const d = o.devname || o.devid || `unnamed (${o.$file})`;
+  return o.vd && o.vd !== 'root' ? `${d} / ${o.vd}` : d;
+};
+const ipKey = x => { const n = ip4(x); return n == null ? 2 ** 33 : n; };
+const polText = r => [...r.pol].map(([id, nm]) => nm ? `${id} ${nm}` : id).join(', ');
+const MX_COLS = [
+  ['ls', 'Log source', r => r.ls, r => r.ls],
+  ['src', 'Source', r => r.src, r => ipKey(r.src), 'm'],
+  ['dst', 'Destination', r => r.dst + (r.ti && r.ti !== r.dst ? ' → ' + r.ti : ''), r => ipKey(r.dst), 'm'],
+  ['dp', 'Port', r => (r.dp || '') + (r.tp && r.tp !== r.dp ? ' → ' + r.tp : ''), r => Number(r.dp) || 0, 'm'],
+  ['svc', 'Service', r => r.svc, r => r.svc],
+  ['pr', 'Proto', r => PROTO[r.pr] || r.pr, r => Number(r.pr) || 0],
+  ['n', 'Sessions', r => fmtN(r.n), r => r.n, 'num'],
+  ['b', 'Blocked', r => r.b ? fmtN(r.b) : '', r => r.b, 'num'],
+  ['sb', 'Sent', r => fmtBytes(r.sb), r => r.sb, 'num'],
+  ['rb', 'Received', r => fmtBytes(r.rb), r => r.rb, 'num'],
+  ['f', 'First seen', r => fmtTime(r.f), r => isFinite(r.f) ? r.f : Infinity, 'm'],
+  ['l', 'Last seen', r => fmtTime(r.l), r => isFinite(r.l) ? r.l : -Infinity, 'm'],
+  ['pol', 'Policy', r => polText(r), r => polText(r)]
+];
+function buildMatrix(F) {
+  const m = new Map();
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i]; if ((o.type || '').toLowerCase() !== 'traffic') continue;
+    const ls = srcLabel(o), src = o.srcip || '', dst = o.dstip || '', dp = o.dstport || '', pr = o.proto || '', ti = o.tranip || '', tp = o.tranport || '';
+    const key = o.$srcId + '|' + src + '|' + dst + '|' + dp + '|' + pr + '|' + ti + '|' + tp;
+    let r = m.get(key);
+    if (!r) m.set(key, r = { ls, src, dst, dp, pr, ti, tp, svc: o.service || '', n: 0, b: 0, sb: 0, rb: 0, f: Infinity, l: -Infinity, pol: new Map() });
+    r.n++;
+    if (o.$v === 'blocked') r.b++;
+    r.sb += Number(o.sentbyte) || 0; r.rb += Number(o.rcvdbyte) || 0;
+    const t = o.$t; if (t === t) { if (t < r.f) r.f = t; if (t > r.l) r.l = t; }
+    if (o.policyid !== undefined && !r.pol.has(o.policyid) && r.pol.size < 5) r.pol.set(o.policyid, o.policyname || '');
+  }
+  return [...m.values()];
+}
+function sortMatrix(rows, k, dir) {
+  const col = MX_COLS.find(c => c[0] === k) || MX_COLS[6], get = col[3];
+  return rows.sort((a, b) => { const x = get(a), y = get(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || b.n - a.n; });
+}
+function renderMatrix(rebuild) {
+  if (rebuild) { state.mx = buildMatrix(state.F); state.mxPage = 0; }
+  const rows = sortMatrix(state.mx, state.mxSort.k, state.mxSort.dir), n = rows.length;
+  const PS = state.mxPageSize, pages = Math.max(1, Math.ceil(n / PS));
+  state.mxPage = clamp(state.mxPage, 0, pages - 1);
+  const traffic = rows.reduce((a, r) => a + r.n, 0);
+  const order = colOrder('mx', MX_COLS);
+  $('mxHead').innerHTML = '<tr>' + order.map(ci => {
+    const [k, label, , , cls] = MX_COLS[ci], on = state.mxSort.k === k, arrow = on ? (state.mxSort.dir < 0 ? ' ↓' : ' ↑') : '';
+    return headCell('mx', ci, `${esc(label)}${arrow}`, cls === 'num' ? 'num' : '', ` aria-sort="${on ? (state.mxSort.dir < 0 ? 'descending' : 'ascending') : 'none'}"`,
+      'Click to sort. Drag to move. Drag the right edge to resize. Alt+Left/Right also moves.');
+  }).join('') + '</tr>';
+  applyColWidths('mx', $('mxHead'), MX_COLS);
+  const html = [], s0 = state.mxPage * PS;
+  for (let i = s0; i < Math.min(s0 + PS, n); i++) {
+    const r = rows[i];
+    html.push(`<tr tabindex="0" data-i="${i}">` + order.map(ci => { const [, , fn, , cls] = MX_COLS[ci], v = fn(r); return `<td class="${cls || ''}" title="${esc(v)}">${esc(v)}</td>`; }).join('') + '</tr>');
+  }
+  $('mxBody').innerHTML = html.join('') || `<tr><td colspan="${MX_COLS.length}" class="muted">No traffic logs in this selection.</td></tr>`;
+  const sortName = (MX_COLS.find(c => c[0] === state.mxSort.k) || [, 'Sessions'])[1];
+  $('mxInfo').textContent = n
+    ? `${fmtN(n)} distinct flows from ${fmtN(traffic)} traffic events, sorted by ${sortName.toLowerCase()}${state.mxSort.dir < 0 ? ' (highest first)' : ' (lowest first)'}.`
+    : '';
+  $('mxPageInfo').textContent = n ? `Rows ${fmtN(s0 + 1)} to ${fmtN(Math.min(s0 + PS, n))} of ${fmtN(n)}` : '0 rows';
+  $('mxPrev').disabled = state.mxPage === 0;
+  $('mxNext').disabled = state.mxPage >= pages - 1;
+  $('mxExport').disabled = !n;
+  state.mxRows = rows;
+}
+function exportMatrix() {
+  const rows = state.mxRows || []; if (!rows.length) return;
+  const head = ['log_source', 'srcip', 'dstip', 'nat_ip', 'dstport', 'nat_port', 'service', 'proto', 'sessions', 'allowed', 'blocked', 'sent_bytes', 'rcvd_bytes', 'first_seen_utc', 'last_seen_utc', 'policies'];
+  const iso = t => isFinite(t) ? new Date(t).toISOString() : '';
+  const out = [head.join(',') + '\n']; let buf = [];
+  for (const r of rows) {
+    buf.push([r.ls, r.src, r.dst, r.ti, r.dp, r.tp, r.svc, PROTO[r.pr] || r.pr, r.n, r.n - r.b, r.b, r.sb, r.rb, iso(r.f), iso(r.l), polText(r)].map(csvCell).join(','));
+    if (buf.length >= 5000) { out.push(buf.join('\n') + '\n'); buf = []; }
+  }
+  if (buf.length) out.push(buf.join('\n') + '\n');
+  download(`fortigate-matrix-${stampName()}.csv`, out, 'text/csv');
+}
+
+/* ---------- case summary ---------- */
+// Log values are attacker-controlled. In the Markdown summary they are made inert: hidden characters shown,
+// URLs defanged (no auto-linking), and every character that can start Markdown structure or raw HTML escaped.
+const defang = s => s.replace(/\b(https?|ftp)(:\/\/)/gi, (m, sch) => sch.replace(/t/gi, 'x') + '[://]').replace(/\bwww\./gi, 'www[.]');
+const mdc = v => defang(vis(v)).replace(/[\r\n]+/g, ' ').replace(/[\\`*_{}\[\]<>|~!#]/g, '\\$&');
+// inside a code span nothing is interpreted except the closing backtick (and | in GFM tables)
+const mdcode = v => '`' + vis(v).replace(/[\r\n]+/g, ' ').replace(/`/g, "'").replace(/\|/g, '\\|') + '`';
+function buildSummary() {
+  const F = state.F, now = new Date(), md = [];
+  let lo = NaN, hi = NaN;
+  for (let i = 0; i < F.length; i++) if (isFinite(F[i].$t)) { lo = F[i].$t; break; }
+  for (let i = F.length - 1; i >= 0; i--) if (isFinite(F[i].$t)) { hi = F[i].$t; break; }
+  const iso = t => isFinite(t) ? new Date(t).toISOString().replace('.000Z', 'Z') : 'n/a';
+  md.push('# FortiGate log triage: case summary', '');
+  md.push(`Generated ${fmtTime(now.getTime())} (${tzLabel()}), ${iso(now.getTime())}. Produced offline by fortigate-log-triage.html version ${TOOL_VERSION}, script SHA-256 ${TOOL_FP}.`, '');
+  md.push('Leads and "inferred" notes are heuristics generated by the tool. Treat them as questions to verify against the logs, not as findings.', '');
+  md.push('Values copied from the logs are treated as untrusted: URLs are defanged (hxxps[://]) and hidden characters are shown as ⟦U+XXXX⟧.', '');
+
+  md.push('## Evidence files', '', '| File | Size (bytes) | SHA-256 | Formats detected | Events | Unrecognised lines |', '|---|---:|---|---|---:|---:|');
+  state.files.forEach((f, i) => {
+    const c = Object.entries(state.fileFmts[i] || {});
+    const ev = c.reduce((a, [, n]) => a + n, 0);
+    md.push(`| ${mdc(f)} | ${state.fileSize[i]} | ${mdcode(state.fileHash[i] || 'not computed')} | ${mdc(c.map(([k]) => FMT_LABEL[k]).join('; ') || 'none')} | ${ev} | ${state.fileSkipped[i] || 0} |`);
+  });
+  md.push('', 'SHA-256 is computed over the file bytes exactly as loaded (compressed bytes for .gz). Compare against hashes from the provider to confirm the files were not altered in transit.', '');
+
+  md.push('## Scope of this summary', '');
+  md.push(`- Events loaded: ${fmtN(state.events.length)}`);
+  md.push(`- Events covered by this summary: ${fmtN(F.length)}${F.length === state.events.length ? ' (no filters applied)' : ''}`);
+  md.push(`- Detected time range: ${isFinite(lo) ? `${iso(lo)} to ${iso(hi)} (UTC); ${fmtTime(lo)} to ${fmtTime(hi)} (${tzLabel()})` : 'no timestamped events'}`);
+  md.push(`- Filters applied: ${state.tokens.length ? state.tokens.map(mdcode).join(' ') : 'none'}`);
+  md.push(`- Time selection: ${state.range ? `${iso(state.range[0])} to ${iso(state.range[1])} (UTC)` : 'none'}`);
+  md.push(`- Unloaded from this session: ${state.unloaded.length ? state.unloaded.map(u => `${mdc(u.name)} (${u.sid}, ${fmtN(u.n)} events, ${mdc(u.files)})`).join('; ') : 'none'}`, '');
+
+  md.push('## Data quality', '');
+  const w = getWarnings();
+  md.push(...(w.length ? w.map(x => `- ${mdc(x)}`) : ['- No parser warnings.']), '');
+
+  md.push('## Log sources', '', '| Id | Name | Model | Serial | VDOMs | Events | Source files |', '|---|---|---|---|---|---:|---|');
+  for (const d of state.devs) md.push(`| ${d.sid} | ${mdc(state.labels.has(d.sid) ? `${state.labels.get(d.sid)} (renamed; name in logs: ${d.host})` : d.host)} | ${mdc(d.model)} | ${mdc(d.sn || 'not in logs')} | ${mdc([...d.vds].join(', ') || 'not in logs')} | ${d.n} | ${mdc(d.srcFiles)} |`);
+  const noted = state.devs.filter(d => d.notes.length);
+  if (noted.length) {
+    md.push('');
+    for (const d of noted) for (const n of d.notes) md.push(`- ${d.sid} ${mdc(labelOf(d.sid, d.anon ? `Unnamed source (${d.anonFile}${d.anonVd ? ', VDOM ' + d.anonVd : ''})` : d.host + (d.sn ? ' (' + d.sn + ')' : '')))}, inferred: ${mdc(n)}`);
+  }
+  md.push('');
+
+  md.push('## Leads in this selection', '');
+  const L = computeLeads(F);
+  if (!L.length) md.push('No leads from the built-in checks. These checks are narrow, so no lead is not the same as no problem.', '');
+  for (const l of L) {
+    md.push(`### ${l.title} (${l.level === 'first' ? 'look first' : 'review'})`, '', `_${mdc(l.why)}_`, '');
+    for (const r of l.rows) md.push(`- ${mdcode(r.k)}: ${mdc(r.d)}`);
+    md.push('');
+  }
+
+  const flows = sortMatrix(buildMatrix(F), 'n', -1);
+  md.push('## Top flows', '', flows.length ? `Top ${Math.min(25, flows.length)} of ${fmtN(flows.length)} distinct flows by sessions. The full matrix is available as a CSV export from the tool.` : 'No traffic logs in this selection.', '');
+  if (flows.length) {
+    md.push('| Log source | Source | Destination | Port | Service | Proto | Sessions | Blocked | Sent | Received | First seen (UTC) | Last seen (UTC) | Policy |', '|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|');
+    for (const r of flows.slice(0, 25))
+      md.push(`| ${mdc(r.ls)} | ${mdc(r.src)} | ${mdc(r.dst + (r.ti && r.ti !== r.dst ? ' → ' + r.ti : ''))} | ${mdc(r.dp + (r.tp && r.tp !== r.dp ? ' → ' + r.tp : ''))} | ${mdc(r.svc)} | ${mdc(PROTO[r.pr] || r.pr)} | ${r.n} | ${r.b} | ${mdc(fmtBytes(r.sb))} | ${mdc(fmtBytes(r.rb))} | ${iso(r.f)} | ${iso(r.l)} | ${mdc(polText(r))} |`);
+    md.push('');
+  }
+  md.push('## Analyst notes', '', '_Conclusions, verification steps taken, and open questions._', '');
+  return md.join('\n');
+}
+function exportSummary() {
+  if (!state.events.length) return;
+  download(`fortigate-case-summary-${stampName()}.md`, [buildSummary()], 'text/markdown');
+}
+
+function renderAll() {
+  renderStatus(); renderChips(); drawTimeline(); renderFindings(); renderTops(); renderMatrix(true); renderTable();
+}
+
+/* ---------- detail drawer ---------- */
+const PREF = ['date', 'time', 'eventtime', 'tz', 'devname', 'devid', 'vd', 'logid', 'type', 'subtype', 'level', 'logdesc', 'action', 'status',
+  'srcip', 'srcport', 'srcintf', 'srccountry', 'dstip', 'dstport', 'dstintf', 'dstcountry', 'remip', 'user', 'group', 'service', 'app',
+  'policyid', 'policyname', 'trandisp', 'tranip', 'tranport', 'sentbyte', 'rcvdbyte', 'duration', 'attack', 'virus', 'url', 'hostname', 'catdesc', 'msg'];
+const prefIdx = k => { const i = PREF.indexOf(k); return i < 0 ? 999 : i; };
+function openDrawer(o) {
+  state.cur = o;
+  const keys = Object.keys(o).filter(k => k[0] !== '$').sort((a, b) => prefIdx(a) - prefIdx(b) || a.localeCompare(b));
+  const src = o.srcip || o.remip, hasT = isFinite(o.$t);
+  $('drawer').innerHTML = `<header><h2>Event details</h2><button class="btn small" type="button" data-act="close">Close</button></header>
+    <p class="meta"><span class="act v-${o.$v}">${esc(o.$v)}</span> <span class="muted">${esc(fmtTime(o.$t))} (${esc(tzLabel())}), from ${esc(state.files[o.$f] || '')}</span></p>
+    <div class="dacts">
+      <button class="btn small" type="button" data-act="around" ${hasT ? '' : 'disabled'}>Five minutes either side</button>
+      <button class="btn small" type="button" data-act="samesrc" ${hasT && src ? '' : 'disabled'}>Same source, five minutes either side</button>
+      <button class="btn small" type="button" data-act="copy">Copy raw line</button>
+    </div>
+    <p class="hint" style="margin-bottom:8px">Click a value to filter to it. Shift-click to exclude it.</p>
+    <table class="kv">${keys.map(k => `<tr><th>${esc(k)}</th><td><button type="button" data-k="${escA(k)}" data-v="${escA(o[k])}">${esc(o[k] === '' ? '(empty)' : o[k])}</button></td></tr>`).join('')}</table>
+    <pre>${esc(o.$raw)}</pre>`;
+  $('drawer').hidden = false;
+  $('drawer').querySelector('[data-act="close"]').focus();
+}
+function closeDrawer() { $('drawer').hidden = true; state.cur = null; }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch {}
+    ta.remove(); return ok;
+  }
+}
+
+/* ---------- export ---------- */
+// Log fields are attacker-controlled (URLs, usernames). Neutralise spreadsheet formulas.
+function csvCell(v) {
+  if (v == null) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s) && isNaN(Number(s))) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function stampName() { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`; }
+function download(name, parts, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(parts, { type })); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+function exportCsv() {
+  const F = state.F; if (!F.length) return;
+  const freq = new Map();
+  for (let i = 0; i < F.length; i++) for (const k in F[i]) if (k.charCodeAt(0) !== 36) freq.set(k, (freq.get(k) || 0) + 1);
+  const keys = [...freq.keys()].sort((a, b) => prefIdx(a) - prefIdx(b) || freq.get(b) - freq.get(a) || a.localeCompare(b));
+  const cell = csvCell;
+  const out = [['time_utc', 'verdict', ...keys].join(',') + '\n']; let buf = [];
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i];
+    buf.push([isFinite(o.$t) ? new Date(o.$t).toISOString() : '', o.$v, ...keys.map(k => cell(o[k]))].join(','));
+    if (buf.length >= 5000) { out.push(buf.join('\n') + '\n'); buf = []; }
+  }
+  if (buf.length) out.push(buf.join('\n') + '\n');
+  download(`fortigate-export-${stampName()}.csv`, out, 'text/csv');
+}
+
+/* ---------- sample data ---------- */
+function makeSample() {
+  let seed = 20261013;
+  const R = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const pick = a => a[Math.floor(R() * a.length)], ri = (a, b) => a + Math.floor(R() * (b - a + 1));
+  const end = Math.floor(Date.now() / 6e4) * 6e4, start = end - 3 * 864e5, TZ = 13 * 36e5;
+  const out = [];
+  const stamp = ms => { const d = new Date(ms + TZ); return `date=${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} time=${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`; };
+  const DEV = { hq: 'devname="FGT-HQ-01" devid="FG100FTK20000001"', br: 'devname="FGT-BR-02" devid="FG60FTK20000002"' };
+  const kv = (ms, dev, rest) => out.push([ms, `<189>${stamp(ms)} ${DEV[dev]} eventtime=${ms}000000 tz="+1300" ${rest}`]);
+  const pub = () => pick(['198.51.100.', '203.0.113.', '192.0.2.']) + ri(20, 254);
+  const countries = ['United States', 'Australia', 'New Zealand', 'Singapore', 'Japan', 'Ireland', 'Netherlands'];
+  const svcs = [['HTTPS', 443, 6, 'HTTPS.BROWSER'], ['HTTPS', 443, 6, 'Microsoft.Portal'], ['HTTPS', 443, 6, 'Microsoft.Outlook'], ['HTTPS', 443, 6, 'Zoom'],
+    ['HTTPS', 443, 6, 'Salesforce'], ['HTTP', 80, 6, 'HTTP.BROWSER'], ['DNS', 53, 17, 'DNS'], ['NTP', 123, 17, 'NTP']];
+  let sid = 81000000;
+  const traffic = (ms, dev, src, sport, dst, dport, proto, svc, app, act, pol, pname, sb, rb, extra = '') =>
+    kv(ms, dev, `logid="0000000013" type="traffic" subtype="forward" level="${act === 'deny' ? 'warning' : 'notice'}" vd="root" srcip=${src} srcport=${sport} srcintf="${src.startsWith('10.212') ? 'ssl.root' : src.startsWith('10.') ? 'internal' : 'wan1'}" dstip=${dst} dstport=${dport} dstintf="${dst.startsWith('10.') || dst === '203.0.113.10' ? 'internal' : 'wan1'}" srccountry="${src.startsWith('10.') ? 'Reserved' : pick(countries)}" dstcountry="${dst.startsWith('10.') ? 'Reserved' : pick(countries)}" sessionid=${sid++} proto=${proto} action="${act}" policyid=${pol}${pname ? ` policyname="${pname}"` : ''} service="${svc}"${app ? ` app="${app}"` : ''} duration=${ri(1, 300)} sentbyte=${sb} rcvdbyte=${rb} ${extra}`.trim());
+
+  // background: outbound user traffic and inbound internet noise
+  for (let i = 0; i < 16000; i++) {
+    const ms = start + Math.floor(R() * (end - start)), dev = R() < 0.75 ? 'hq' : 'br';
+    if (R() < 0.12) {
+      traffic(ms, dev, pub(), ri(1024, 65000), '203.0.113.10', pick([22, 23, 445, 3389, 8080, 8443, 5900, 1433]), 6, 'tcp', '', 'deny', 0, '', 0, 0);
+    } else {
+      const [svc, port, proto, app] = pick(svcs), src = dev === 'hq' ? `10.10.10.${ri(10, 60)}` : `10.20.0.${ri(10, 40)}`;
+      traffic(ms, dev, src, ri(40000, 65000), port === 53 ? '192.0.2.53' : pub(), port, proto, svc, app, pick(['close', 'close', 'close', 'timeout', 'accept', 'client-rst']), port === 53 ? 5 : 1, port === 53 ? 'DNS-out' : 'LAN-to-WAN', ri(200, 90000), ri(500, 900000));
+    }
+  }
+  // a little CEF from the branch box, as it would arrive at a Sentinel forwarder
+  for (let i = 0; i < 400; i++) {
+    const ms = start + Math.floor(R() * (end - start)), [svc, port, proto, app] = pick(svcs);
+    out.push([ms, `<189>CEF:0|Fortinet|Fortigate|v7.4.3|00013|traffic:forward close|3|deviceExternalId=FG60FTK20000002 FTNTFGTeventtime=${ms}000000 FTNTFGTtz=+1300 FTNTFGTlogid=0000000013 cat=traffic:forward FTNTFGTsubtype=forward FTNTFGTlevel=notice FTNTFGTvd=root src=10.20.0.${ri(10, 40)} spt=${ri(40000, 65000)} deviceInboundInterface=internal dst=${pub()} dpt=${port} deviceOutboundInterface=wan1 FTNTFGTsrccountry=Reserved FTNTFGTdstcountry=${pick(countries)} proto=${proto} act=close FTNTFGTpolicyid=1 FTNTFGTpolicyname=LAN-to-WAN app=${svc} FTNTFGTapp=${app} FTNTFGTduration=${ri(1, 200)} out=${ri(200, 50000)} in=${ri(500, 500000)} dvchost=FGT-BR-02`]);
+  }
+  // routine admin logins
+  for (let d = 0; d < 3; d++) {
+    const ms = start + d * 864e5 + 9 * 36e5;
+    kv(ms, 'hq', `logid="0100032001" type="event" subtype="system" level="information" vd="root" logdesc="Admin login successful" sn=${ri(1e9, 2e9)} user="netops" ui="https(10.10.10.5)" method="https" srcip=10.10.10.5 dstip=10.10.10.1 action="login" status="success" reason="none" profile="super_admin" msg="Administrator netops logged in successfully from https(10.10.10.5)"`);
+  }
+  // web filter blocks
+  const cats = [['Malicious Websites', 'cdn-update.example'], ['Phishing', 'login-m1crosoft.example'], ['Proxy Avoidance', 'freeproxy.example'], ['Newly Registered Domain', 'qx7-delivery.example'], ['Gambling', 'spin.example']];
+  for (let i = 0; i < 140; i++) {
+    const ms = start + Math.floor(R() * (end - start)), [cat, host] = pick(cats);
+    kv(ms, 'hq', `logid="0316013056" type="utm" subtype="webfilter" eventtype="ftgd_blk" level="warning" vd="root" policyid=1 sessionid=${sid++} srcip=10.10.10.${ri(10, 60)} srcport=${ri(40000, 65000)} dstip=${pub()} dstport=443 service="HTTPS" hostname="${host}" profile="default" action="blocked" reqtype="direct" url="https://${host}/" direction="outgoing" msg="URL belongs to a denied category in policy" method="domain" catdesc="${cat}"`);
+  }
+  // EICAR test downloads, blocked
+  for (let i = 0; i < 3; i++) {
+    const ms = start + Math.floor(R() * (end - start));
+    kv(ms, 'hq', `logid="0211008192" type="utm" subtype="virus" eventtype="infected" level="warning" vd="root" policyid=1 srcip=198.51.100.${ri(20, 90)} dstip=10.10.10.${ri(10, 60)} srcport=443 dstport=${ri(40000, 65000)} service="HTTPS" direction="incoming" action="blocked" virus="EICAR_TEST_FILE" filename="eicar.com" url="https://files.example/eicar.com" msg="File is infected."`);
+  }
+  // Log4j probes from the internet, dropped
+  for (let i = 0; i < 18; i++) {
+    const ms = start + Math.floor(R() * 864e5);
+    kv(ms, 'hq', `logid="0419016384" type="utm" subtype="ips" eventtype="signature" level="alert" vd="root" severity="critical" srcip=203.0.113.5 srccountry="Netherlands" dstip=203.0.113.10 srcintf="wan1" dstintf="internal" policyid=0 sessionid=${sid++} proto=6 action="dropped" service="HTTPS" attack="Apache.Log4j.Error.Log.Remote.Code.Execution" srcport=${ri(30000, 60000)} dstport=443 direction="outgoing" attackid=51006 msg="applications3: Apache.Log4j.Error.Log.Remote.Code.Execution"`);
+  }
+
+  // 1. port scan against the WAN
+  let t = end - 50 * 36e5;
+  for (let p = 1; p <= 600; p++) traffic(t + p * 600, 'hq', '198.51.100.6', ri(40000, 60000), '203.0.113.10', p, 6, 'tcp', '', 'deny', 0, '', 0, 0);
+
+  // 2. SSL VPN spray, then success
+  t = end - 30 * 36e5;
+  const users = ['admin', 'administrator', 'j.smith', 's.patel', 'm.wong', 'backup', 'scanner', 'test', 'r.taylor', 'k.nguyen', 'l.brown', 'helpdesk', 'svc_vpn', 'a.jones', 't.wilson', 'e.clark', 'p.lee', 'd.martin', 'c.white', 'vpnuser'];
+  for (let i = 0; i < 72; i++) {
+    const u = users[i % users.length];
+    kv(t + i * 50e3, 'hq', `logid="0101039426" type="event" subtype="vpn" level="alert" vd="root" logdesc="SSL VPN login fail" action="ssl-login-fail" tunneltype="ssl-web" tunnelid=0 remip=192.0.2.7 user="${u}" group="N/A" dst_host="N/A" reason="${u === 'j.smith' ? 'sslvpn_login_permission_denied' : 'sslvpn_login_unknown_user'}" msg="SSL user failed to logged in"`);
+  }
+  t += 72 * 50e3 + 9e4;
+  kv(t, 'hq', `logid="0101039947" type="event" subtype="vpn" level="information" vd="root" logdesc="SSL VPN tunnel up" action="tunnel-up" tunneltype="ssl-tunnel" tunnelid=1873 remip=192.0.2.7 tunnelip=10.212.134.200 user="j.smith" group="SSLVPN-Users" dst_host="N/A" reason="N/A" msg="SSL tunnel established"`);
+
+  // 3. discovery from the VPN address
+  t += 4 * 6e4;
+  for (let h = 1; h <= 150; h++) traffic(t + h * 900, 'hq', '10.212.134.200', ri(40000, 60000), `10.10.20.${h}`, 445, 6, 'SMB', '', h % 7 === 0 ? 'close' : 'deny', h % 7 === 0 ? 7 : 0, h % 7 === 0 ? 'SSLVPN-to-LAN' : '', 300, 120);
+  t += 150 * 900 + 6e4;
+  for (let i = 0; i < 6; i++)
+    kv(t + i * 8e3, 'hq', `logid="0419016384" type="utm" subtype="ips" eventtype="signature" level="alert" vd="root" severity="high" srcip=10.212.134.200 dstip=10.10.20.11 srcintf="ssl.root" dstintf="internal" policyid=7 sessionid=${sid++} proto=6 action="detected" service="SMB" attack="SMB.Login.Brute.Force" srcport=${ri(40000, 60000)} dstport=445 direction="outgoing" attackid=15623 msg="network: SMB.Login.Brute.Force"`);
+
+  // 4. admin brute force from the VPN address, then success and config changes
+  t += 10 * 6e4;
+  for (let i = 0; i < 7; i++)
+    kv(t + i * 12e3, 'hq', `logid="0100032002" type="event" subtype="system" level="alert" vd="root" logdesc="Admin login failed" sn=0 user="admin" ui="https(10.212.134.200)" method="https" srcip=10.212.134.200 dstip=10.10.10.1 action="login" status="failed" reason="passwd_invalid" msg="Administrator admin login failed from https(10.212.134.200) because of invalid password"`);
+  t += 7 * 12e3 + 3e4;
+  kv(t, 'hq', `logid="0100032001" type="event" subtype="system" level="information" vd="root" logdesc="Admin login successful" sn=${ri(1e9, 2e9)} user="admin" ui="https(10.212.134.200)" method="https" srcip=10.212.134.200 dstip=10.10.10.1 action="login" status="success" reason="none" profile="super_admin" msg="Administrator admin logged in successfully from https(10.212.134.200)"`);
+  kv(t + 9e4, 'hq', `logid="0100044547" type="event" subtype="system" level="information" vd="root" logdesc="Object attribute configured" user="admin" ui="GUI(10.212.134.200)" action="Add" cfgtid=${ri(1e6, 9e6)} cfgpath="system.admin" cfgobj="support2" cfgattr="accprofile[super_admin]vdom[root]" msg="Add system.admin support2"`);
+  kv(t + 15e4, 'hq', `logid="0100044547" type="event" subtype="system" level="information" vd="root" logdesc="Object attribute configured" user="admin" ui="GUI(10.212.134.200)" action="Add" cfgtid=${ri(1e6, 9e6)} cfgpath="firewall.policy" cfgobj="99" cfgattr="srcintf[wan1]dstintf[internal]srcaddr[all]dstaddr[all]action[accept]service[ALL]" msg="Add firewall.policy 99"`);
+
+  // 5. passthrough AV hit on the file server, then large outbound transfer
+  t += 25 * 6e4;
+  kv(t, 'hq', `logid="0211008193" type="utm" subtype="virus" eventtype="infected" level="warning" vd="root" policyid=7 srcip=10.212.134.200 dstip=10.10.20.11 srcport=${ri(40000, 60000)} dstport=445 service="SMB" direction="outgoing" action="monitored" virus="Riskware/Mimikatz" filename="m64.exe" msg="File is infected."`);
+  for (let i = 0; i < 12; i++)
+    traffic(t + 6e5 + i * 18e4, 'hq', '10.10.20.11', ri(40000, 60000), '198.51.100.9', 443, 6, 'HTTPS', 'HTTPS.BROWSER', 'close', 2, 'Servers-to-WAN', ri(220e6, 310e6), ri(20000, 90000));
+
+  // a cloud FortiGate-VM, exported from FortiAnalyzer as quoted CSV
+  const csvCell = (k, v, q) => q ? `"${k}=""${v}"""` : `"${k}=${v}"`;
+  for (let i = 0; i < 300; i++) {
+    const ms = start + Math.floor(R() * (end - start)), d = new Date(ms + TZ), [svc, port, proto, app] = pick(svcs);
+    const cells = [
+      csvCell('itime', Math.floor(ms / 1000) + 1), csvCell('date', `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`, 1),
+      csvCell('time', `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`, 1), csvCell('devid', 'FGVM02TM24000003', 1),
+      csvCell('vd', 'root', 1), csvCell('type', 'traffic', 1), csvCell('subtype', 'forward', 1), csvCell('action', pick(['close', 'close', 'timeout', 'deny']), 1),
+      csvCell('app', app, 1), '""', csvCell('devname', 'fw-cloud-01', 1), csvCell('dstcountry', pick(countries), 1), csvCell('dstip', pub(), 1),
+      csvCell('dstport', port), csvCell('eventtime', `${ms}000000`), csvCell('level', 'notice', 1), csvCell('logid', '0000000013', 1), csvCell('logver', '704051234'),
+      csvCell('policyid', 3), csvCell('policyname', 'Cloud-to-WAN', 1), csvCell('policytype', 'policy', 1), csvCell('proto', proto), csvCell('rcvdbyte', ri(500, 400000)), '""',
+      csvCell('sentbyte', ri(200, 40000)), csvCell('service', svc, 1), csvCell('sessionid', sid++), csvCell('srccountry', 'Reserved', 1),
+      csvCell('srcip', `10.30.1.${ri(4, 30)}`, 1), csvCell('srcport', ri(40000, 65000)), csvCell('tz', '+1300', 1)
+    ];
+    out.push([ms, cells.join(',')]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return out.map(x => x[1]).join('\n') + '\n';
+}
+
+/* ---------- wiring ---------- */
+function resetAll() {
+  Object.assign(state, { srcIds: new Map(), srcSeq: 0, labels: new Map(), renaming: null, unloaded: [], fileUnloaded: [], longLines: 0, events: [], files: [], fileFmts: [], fileHash: [], fileSize: [], fileSkipped: [], devs: [], mx: [], fileErrors: [], skipped: 0, skippedSamples: [], noTime: 0, noTz: 0, truncated: 0, tokens: [], range: null, page: 0, mxPage: 0, C: [], F: [], buckets: null, filterError: '' });
+  $('q').value = ''; closeDrawer();
+  $('main').hidden = true; $('empty').hidden = false; $('clearBtn').hidden = true; $('summaryBtn').hidden = true; $('devices').innerHTML = '';
+}
+function init() {
+  $('fileInput').addEventListener('change', e => { loadFiles(e.target.files); e.target.value = ''; });
+  $('openLbl').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); } });
+  $('sampleBtn').addEventListener('click', () => loadFiles([new File([makeSample()], 'sample-fortigate.log', { type: 'text/plain' })]));
+  $('clearBtn').addEventListener('click', resetAll);
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    state.tz = b.dataset.tz;
+    document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    if (state.events.length) { applyFilters(); if (state.cur) openDrawer(state.cur); }
+  }));
+  const apply = () => { state.tokens = tokenize($('q').value); applyFilters(); };
+  $('q').addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
+  $('q').addEventListener('search', apply);
+  $('applyBtn').addEventListener('click', apply);
+  $('helpBtn').addEventListener('click', () => { const h = $('help'); h.hidden = !h.hidden; $('helpBtn').setAttribute('aria-expanded', String(!h.hidden)); });
+  $('chips').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.range) { state.range = null; applyFilters({ keepC: true }); return; }
+    state.tokens.splice(Number(b.dataset.i), 1); $('q').value = state.tokens.join(' '); applyFilters();
+  });
+  $('rangeReset').addEventListener('click', () => { state.range = null; applyFilters({ keepC: true }); });
+  $('tops').addEventListener('click', e => { const b = e.target.closest('.trow'); if (b) addTokens([makeToken(b.dataset.f, b.dataset.v, e.shiftKey)]); });
+  setupSourceCards('devices');
+  $('findings').addEventListener('click', e => { const b = e.target.closest('.frow'); if (b) addTokens(JSON.parse(b.dataset.t)); });
+  const openRow = tr => { if (tr && tr.dataset.i) openDrawer(state.F[Number(tr.dataset.i)]); };
+  $('evBody').addEventListener('click', e => openRow(e.target.closest('tr')));
+  $('evBody').addEventListener('keydown', e => { if (e.key === 'Enter') openRow(e.target.closest('tr')); });
+  $('sortBtn').addEventListener('click', () => { state.newestFirst = !state.newestFirst; state.page = 0; renderTable(); });
+  $('prevBtn').addEventListener('click', () => { state.page--; renderTable(); $('evWrap').scrollTop = 0; });
+  $('nextBtn').addEventListener('click', () => { state.page++; renderTable(); $('evWrap').scrollTop = 0; });
+  const setPageSize = () => {
+    const el = $('pageSize'), raw = el.value.replace(/[,\s]/g, ''), n = Number(raw);
+    if (!/^\d+$/.test(raw) || n < 1) { el.setAttribute('aria-invalid', 'true'); el.title = 'Enter a whole number from 1 to 5,000'; return; }
+    const size = Math.min(n, PAGE_MAX);
+    el.removeAttribute('aria-invalid'); el.title = 'Pick a size or type any number from 1 to 5,000, then press Enter';
+    el.value = String(size);
+    if (size === state.pageSize) return;
+    const firstRow = state.page * state.pageSize;          // keep the first visible row on screen
+    state.pageSize = size; state.page = Math.floor(firstRow / size);
+    renderTable(); $('evWrap').scrollTop = 0;
+  };
+  $('pageSize').addEventListener('change', setPageSize);
+  $('pageSize').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); setPageSize(); } });
+  $('exportBtn').addEventListener('click', exportCsv);
+  $('drawer').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const o = state.cur; if (!o) return;
+    if (b.dataset.k) { addTokens([makeToken(b.dataset.k, b.dataset.v, e.shiftKey)]); return; }
+    const act = b.dataset.act;
+    if (act === 'close') closeDrawer();
+    else if (act === 'around') { state.range = [o.$t - 3e5, o.$t + 3e5]; applyFilters({ keepC: true }); }
+    else if (act === 'samesrc') { state.tokens = [`ip=${o.srcip || o.remip}`]; $('q').value = state.tokens.join(' '); state.range = [o.$t - 3e5, o.$t + 3e5]; applyFilters(); }
+    else if (act === 'copy') { const ok = await copyText(o.$raw); b.textContent = ok ? 'Copied' : 'Copy failed: select the line below'; setTimeout(() => { b.textContent = 'Copy raw line'; }, 1600); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('drawer').hidden) closeDrawer(); });
+
+  let depth = 0;
+  const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; $('dropOverlay').hidden = false; });
+  window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) $('dropOverlay').hidden = true; });
+  window.addEventListener('drop', e => { e.preventDefault(); depth = 0; $('dropOverlay').hidden = true; if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+  setupTimeline();
+  setupColumns('ev', 'evHead', COLS, renderTable, 'colReset');
+  $('summaryBtn').addEventListener('click', exportSummary);
+  $('mxExport').addEventListener('click', exportMatrix);
+  const mxSort = th => {
+    const k = MX_COLS[+th.dataset.c][0];
+    state.mxSort = state.mxSort.k === k ? { k, dir: -state.mxSort.dir } : { k, dir: ['n', 'b', 'sb', 'rb', 'l'].includes(k) ? -1 : 1 };
+    state.mxPage = 0; renderMatrix(false);
+  };
+  setupColumns('mx', 'mxHead', MX_COLS, () => renderMatrix(false), 'mxColReset', mxSort);
+  const mxOpen = tr => {
+    if (!tr || tr.dataset.i === undefined) return;
+    const r = state.mxRows[Number(tr.dataset.i)];
+    addTokens([makeToken('srcip', r.src), makeToken('dstip', r.dst)].concat(r.dp ? [makeToken('dstport', r.dp)] : []));
+  };
+  $('mxBody').addEventListener('click', e => mxOpen(e.target.closest('tr')));
+  $('mxBody').addEventListener('keydown', e => { if (e.key === 'Enter') mxOpen(e.target.closest('tr')); });
+  const mxPageSize = () => {
+    const el = $('mxPageSize'), raw = el.value.replace(/[,\s]/g, ''), n = Number(raw);
+    if (!/^\d+$/.test(raw) || n < 1) { el.setAttribute('aria-invalid', 'true'); return; }
+    el.removeAttribute('aria-invalid');
+    const v = Math.min(n, PAGE_MAX), first = state.mxPage * state.mxPageSize; el.value = String(v);
+    state.mxPageSize = v; state.mxPage = Math.floor(first / v); renderMatrix(false); $('mxWrap').scrollTop = 0;
+  };
+  $('mxPageSize').addEventListener('change', mxPageSize);
+  $('mxPageSize').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); mxPageSize(); } });
+  $('mxPrev').addEventListener('click', () => { state.mxPage--; renderMatrix(false); $('mxWrap').scrollTop = 0; });
+  $('mxNext').addEventListener('click', () => { state.mxPage++; renderMatrix(false); $('mxWrap').scrollTop = 0; });
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(drawTimeline, 120); });
+}
+
+// Fingerprint of the exact script text that is running. It equals the hash pinned in the page's CSP, so a summary
+// can be traced to the code that produced it.
+let TOOL_FP = 'unavailable';
+if (typeof document !== 'undefined') {
+  try { const h = new Sha256(); h.update(new TextEncoder().encode(document.currentScript.textContent)); TOOL_FP = h.hex(); } catch {}
+  init();
+  $('toolVer').textContent = `v${TOOL_VERSION}`;
+  $('aboutVer').textContent = TOOL_VERSION;
+  $('aboutFp').textContent = TOOL_FP;
+  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) =>
+    `<section class="cl"><h4>${esc(v)}<span>${esc(d)}</span></h4><ul>${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></section>`).join('');
+  const dlg = $('about');
+  $('aboutBtn').addEventListener('click', () => dlg.showModal());
+  $('aboutClose').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });   // click on the backdrop closes
+}
+})();
+</script>
+</body>
+</html>

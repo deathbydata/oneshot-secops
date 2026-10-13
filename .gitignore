@@ -1,0 +1,40 @@
+# Never commit evidence or anything derived from it.
+# Log files and archives
+*.log
+*.log.*
+*.gz
+*.zip
+*.7z
+*.tar
+*.tgz
+*_log
+*-log
+access_log*
+error_log*
+
+# Exports and case summaries produced by the tools
+*.csv
+fortigate-case-summary-*.md
+web-case-summary-*.md
+fortigate-export-*.csv
+fortigate-matrix-*.csv
+web-requests-*.csv
+web-conversations-*.csv
+
+# Working folders people tend to create next to the tools
+samples/
+evidence/
+cases/
+logs/
+exports/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Windows alternate data stream artefacts (copied in from Windows/WSL)
+*:Zone.Identifier
+*:sec.endpointdlp
