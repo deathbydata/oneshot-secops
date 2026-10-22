@@ -7,7 +7,7 @@ Each tool is one HTML file. Open it in a browser, drop the logs on it, and start
 | Tool | File | Version | For |
 |---|---|---|---|
 | FortiGate log triage | `fortigate-log-triage.html` | 1.4.2 | FortiGate traffic, UTM and event logs |
-| Web access log triage | `web-log-triage.html` | 1.3.0 | Apache and nginx access logs |
+| Web access log triage | `web-log-triage.html` | 1.10.0 | Apache and nginx access logs |
 
 The version and the fingerprint of the running script are shown under **About** in each tool, and recorded in every case summary it exports.
 
